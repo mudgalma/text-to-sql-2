@@ -1,0 +1,110 @@
+[
+  {
+    "id": "u01",
+    "category": "aggregate",
+    "query": "What's the total profit?",
+    "expected": {"kind": "scalar", "value": 802.0}
+  },
+  {
+    "id": "u02",
+    "category": "aggregate",
+    "query": "How much did we make in Germany?",
+    "expected": {"kind": "scalar", "value": 855.0}
+  },
+  {
+    "id": "u03",
+    "category": "aggregate",
+    "query": "Show me all revenue from consumer customers",
+    "expected": {"kind": "scalar", "value": 2803.0}
+  },
+  {
+    "id": "u04",
+    "category": "group_by",
+    "query": "Break revenue down by region",
+    "expected": {"kind": "rows", "values": {"NA": 3262.4, "EMEA": 2398.0, "APAC": 474.0}}
+  },
+  {
+    "id": "u05",
+    "category": "group_by",
+    "query": "Profit per customer segment",
+    "expected": {"kind": "rows", "values": {"Corporate": 380.0, "Consumer": 377.0, "Home Office": 45.0}}
+  },
+  {
+    "id": "u06",
+    "category": "group_by",
+    "query": "Monthly revenue breakdown",
+    "expected": {"kind": "rows", "values": {"2024-03": 3542.4, "2024-02": 1446.0, "2024-01": 1146.0}}
+  },
+  {
+    "id": "u07",
+    "category": "rank",
+    "query": "Best 3 cities by sales",
+    "expected": {"kind": "rows_ordered", "values": [["San Francisco", 2068.0], ["Paris", 1288.0], ["New York", 1116.0]]}
+  },
+  {
+    "id": "u08",
+    "category": "rank",
+    "query": "Which customer spent the most?",
+    "expected": {"kind": "rows_ordered", "values": [["C009", 2068.0]]}
+  },
+  {
+    "id": "u09",
+    "category": "rank",
+    "query": "Highest-profit products",
+    "expected": {"kind": "rows_ordered", "values": [["MacBook Air", 200.0], ["Dell XPS", 180.0], ["iPhone 14", 150.0], ["Samsung Galaxy", 120.0], ["Office Desk", 50.0]]}
+  },
+  {
+    "id": "u10",
+    "category": "contribution",
+    "query": "How is revenue split across categories?",
+    "expected": {"kind": "rows_with_pct", "values": {"Technology": 88.06, "Furniture": 9.44, "Office Supplies": 2.5}}
+  },
+  {
+    "id": "u11",
+    "category": "contribution",
+    "query": "Share of profit by region",
+    "expected": {"kind": "rows_with_pct", "values": {"NA": 52.87, "EMEA": 32.54, "APAC": 14.59}}
+  },
+  {
+    "id": "u12",
+    "category": "nested_rank",
+    "query": "Show me the best product per region",
+    "expected": {"kind": "rows", "values": {"APAC": "Ergo Chair", "EMEA": "Samsung Galaxy", "NA": "Dell XPS"}}
+  },
+  {
+    "id": "u13",
+    "category": "nested_rank",
+    "query": "Top 2 products by revenue in each category",
+    "expected": {"kind": "rows", "values": {"Technology|Dell XPS": 2068.0, "Technology|Samsung Galaxy": 1288.0, "Furniture|Ergo Chair": 324.0, "Furniture|Office Desk": 255.0, "Office Supplies|A4 Paper Pack": 78.4, "Office Supplies|Binder Set": 75.0}}
+  },
+  {
+    "id": "u14",
+    "category": "compare",
+    "query": "Which regions are below target for February?",
+    "expected": {"kind": "set", "values": ["APAC", "EMEA", "NA"]}
+  },
+  {
+    "id": "u15",
+    "category": "compare",
+    "query": "Are there any regions that beat their March target?",
+    "expected": {"kind": "set", "values": []}
+  },
+  {
+    "id": "u16",
+    "category": "edge_empty",
+    "query": "Revenue for the store in Neverland",
+    "expected": {"kind": "empty"}
+  },
+  {
+    "id": "u17",
+    "category": "edge_reject",
+    "query": "What's the weather today?",
+    "expected": {"kind": "rejected"}
+  },
+  {
+    "id": "u18",
+    "category": "edge_reject",
+    "query": "Delete all orders",
+    "expected": {"kind": "rejected"}
+  }
+]

@@ -3,12 +3,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import logging
-from typing import Protocol
+from typing import Any, Protocol
+from langsmith import traceable
 
-from engine.interfaces import SemanticLayerProtocol
+from engine.interfaces import SemanticLayerProtocol, ValueIndexProtocol
 from engine.generation.generator import SQLGenerator
 from engine.correction.prompts import SQL_REPAIR_SYSTEM, build_sql_repair_prompt
-from engine.execution.executor import ExecutionResult, Executor
+from engine.execution.executor import ExecutionResult, Executor, is_empty_result
 from engine.types import AnalyticalSpec
 
 
@@ -46,6 +47,7 @@ class SelfCorrector:
         self,
         executor: Executor,
         semantic_layer: SemanticLayerProtocol,
+        value_index: ValueIndexProtocol,
         llm_client: SQLRepairClient | None = None,
         max_retries: int = _MAX_RETRIES,
     ) -> None:
@@ -55,6 +57,7 @@ class SelfCorrector:
             raise ValueError(f"max_retries must be between 0 and {self._MAX_RETRIES}.")
         self._executor = executor
         self._semantic_layer = semantic_layer
+        self._value_index = value_index
         self._llm = llm_client
         self._max_retries = max_retries
         self._view_name = getattr(semantic_layer, "VIEW_NAME", "v_sales")
@@ -64,6 +67,7 @@ class SelfCorrector:
             if (target := semantic_layer.get_target_column(metric)) is not None
         }
 
+    @traceable
     def execute(self, sql: str, spec: AnalyticalSpec) -> CorrectionResult:
         """Execute SQL, requesting at most two safe repairs after failures."""
 
@@ -71,12 +75,28 @@ class SelfCorrector:
         repair_errors: list[str] = []
         retries_used = 0
 
-        while not attempts[-1].success and self._llm is not None:
+        while self._llm is not None:
+            latest = attempts[-1]
+            needs_repair = not latest.success
+            
+            # Treat empty results as failures to heal formatting (unless it's a compare query)
+            is_empty = is_empty_result(latest.df)
+            if latest.success and is_empty and spec.operation != "compare":
+                needs_repair = True
+                
+            if not needs_repair:
+                break
+                
             if retries_used >= self._max_retries:
                 break
             retries_used += 1
+            
             try:
-                repaired_sql = self._repair(attempts[-1].sql, attempts[-1].error or "", spec)
+                error_msg = latest.error or ""
+                if latest.success and is_empty:
+                    context = self._gather_context(spec)
+                    error_msg = f"Query executed successfully but returned exactly 0 rows. Please check if your WHERE clause filters (string casing, exact formatting) might have caused this, and intelligently reformulate the time or string values. Context: {context}"
+                repaired_sql = self._repair(latest.sql, error_msg, spec)
             except SQLRepairError as error:
                 repair_errors.append(str(error))
                 continue
@@ -112,3 +132,29 @@ class SelfCorrector:
                 exc_info=error,
             )
             raise SQLRepairError(f"SQL repair was unavailable: {type(error).__name__}: {error}") from error
+
+    def _gather_context(self, spec: AnalyticalSpec) -> str:
+        """Gather database context for failing filters to help the LLM repair."""
+        context_parts = []
+        
+        # 1. Gather context for normal dimension filters using ValueIndex
+        for f in spec.filters:
+            matches = self._value_index.match(str(f.value))
+            if matches:
+                top_matches = [m.value for m in matches[:3]]
+                context_parts.append(f"For '{f.column}', the closest database matches to '{f.value}' are {top_matches}.")
+                
+        # 2. Gather context for time columns using a quick sample query
+        if spec.time_window and spec.time_window.column:
+            col = spec.time_window.column
+            try:
+                res = self._executor.run(f'SELECT DISTINCT "{col}" FROM {self._view_name} ORDER BY "{col}" DESC LIMIT 5')
+                if res.success and res.df is not None and not res.df.empty:
+                    samples = res.df.iloc[:, 0].dropna().tolist()
+                    context_parts.append(f"For '{col}', sample formats in the database are {samples}.")
+            except Exception:
+                pass
+                
+        if not context_parts:
+            return "No additional context found."
+        return " ".join(context_parts)

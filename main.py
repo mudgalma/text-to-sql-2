@@ -10,7 +10,7 @@ from typing import Any
 from engine.memory.feedback_store import FeedbackStore
 from engine.understanding.spec_builder import SpecBuilder
 from engine.generation.generator import SQLGenerationError, SQLGenerator
-from engine.execution.executor import Executor
+from engine.execution.executor import Executor, is_empty_result
 from engine.correction.repairer import SelfCorrector
 from engine.scoring.scorer import ConfidenceScorer
 from engine.insight.explainer import ExplanationClient, Explainer
@@ -87,14 +87,15 @@ class TextToSQLEngine:
             llm_client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
             adapter = OpenRouterAdapter(llm_client)
 
-        self.tagger = Tagger(self.layer, CardinalityTieredValueIndex(self.layer))
+        value_index = CardinalityTieredValueIndex(self.layer)
+        self.tagger = Tagger(self.layer, value_index)
         
         llm_builder = LLMSpecBuilder(llm_client, self.layer) if llm_client else None
         self.spec_builder = SpecBuilder(self.layer, llm_builder=llm_builder)
         
         self.generator = SQLGenerator(self.layer, llm_client=adapter)
         self.executor = Executor(self.layer)
-        self.corrector = SelfCorrector(self.executor, self.layer, llm_client=adapter)
+        self.corrector = SelfCorrector(self.executor, self.layer, value_index, llm_client=adapter)
         self.scorer = ConfidenceScorer(self.layer)
         self.explainer = Explainer(explanation_client or adapter)
         self.feedback = FeedbackStore(feedback_path or self.data_dir / "feedback_log.csv")
@@ -181,7 +182,7 @@ def _run_query(
         llm_spec_present=bool(spec.defaults_applied and "llm_fallback" in spec.defaults_applied),
         specs_agree=None,
         template_path_used=not feedback_applied,
-        result_count=len(final.df) if final.df is not None else None,
+        result_count=0 if is_empty_result(final.df) else len(final.df),
         feedback_applied=feedback_applied,
     )
     return {
@@ -201,7 +202,10 @@ def _failure_output(query: str, explanation: str) -> dict[str, Any]:
         "generated_logic": None,
         "result": None,
         "confidence_score": 0.0,
-        "explanation": explanation,
+        "explanation": {
+            "understood": explanation,
+            "generated": "No result was generated due to a failure."
+        },
     }
 
 

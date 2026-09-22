@@ -20,6 +20,7 @@ coverage.xml
 # Pipeline outputs (generated at runtime)
 outputs.json
 feedback_log.csv
+eval/runs/*.json
 
 # Environment / secrets — NEVER commit these
 .env

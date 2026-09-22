@@ -14,7 +14,9 @@
     "product_category",
     "product_subcategory",
     "product_name",
-    "order_date"
+    "order_date",
+    "month",
+    "year"
   ],
   "synonyms": {
     "sales": "revenue",

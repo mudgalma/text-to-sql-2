@@ -37,12 +37,16 @@ app.add_middleware(
 class QueryRequest(BaseModel):
     query: str
 
+class ExplanationResponse(BaseModel):
+    understood: str
+    generated: str
+
 class QueryResponse(BaseModel):
     query: str
     generated_logic: str | None
     result: list[Dict[str, Any]] | None
     confidence_score: float
-    explanation: str
+    explanation: ExplanationResponse
 
 @app.post("/query", response_model=QueryResponse)
 async def process_query(request: QueryRequest):

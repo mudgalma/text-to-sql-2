@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
+from langsmith import traceable
 
 import pandas as pd
 
@@ -11,6 +12,17 @@ from engine.generation.generator import SQLGenerator
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+def is_empty_result(df: pd.DataFrame | None) -> bool:
+    """Return True if the dataframe is completely empty or contains only a single row of nulls."""
+    if df is None:
+        return True
+    if len(df) == 0:
+        return True
+    if len(df) == 1 and df.iloc[0].isnull().all():
+        return True
+    return False
 
 
 @dataclass
@@ -29,6 +41,7 @@ class Executor:
     def __init__(self, semantic_layer: SemanticLayerProtocol) -> None:
         self._semantic_layer = semantic_layer
 
+    @traceable
     def run(self, sql: str) -> ExecutionResult:
         """Execute one read-only query and capture any expected execution failure."""
 

@@ -7,6 +7,7 @@ from engine.execution.executor import Executor
 from engine.correction.repairer import SelfCorrector
 from engine.semantic_layer import DuckDBSemanticLayer
 from engine.types import AnalyticalSpec
+from engine.value_index import CardinalityTieredValueIndex
 
 
 @pytest.fixture(scope="module")
@@ -27,6 +28,13 @@ def executor(semantic_layer: DuckDBSemanticLayer) -> Executor:
     """Provide a fresh execution boundary for each correction test."""
 
     return Executor(semantic_layer)
+
+
+@pytest.fixture
+def value_index(semantic_layer: DuckDBSemanticLayer) -> CardinalityTieredValueIndex:
+    """Provide a value index for smart context gathering."""
+
+    return CardinalityTieredValueIndex(semantic_layer)
 
 
 class MockLLM:
@@ -54,12 +62,12 @@ def _spec() -> AnalyticalSpec:
 
 
 def test_successful_first_attempt_skips_repair(
-    executor: Executor, semantic_layer: DuckDBSemanticLayer
+    executor: Executor, semantic_layer: DuckDBSemanticLayer, value_index: CardinalityTieredValueIndex
 ) -> None:
     """A successful execution neither calls the LLM nor consumes a retry."""
 
     client = MockLLM("SELECT 1")
-    result = SelfCorrector(executor, semantic_layer, client).execute(
+    result = SelfCorrector(executor, semantic_layer, value_index, client).execute(
         "SELECT SUM(revenue) AS value FROM v_sales", _spec()
     )
     assert result.final.success is True
@@ -69,12 +77,12 @@ def test_successful_first_attempt_skips_repair(
 
 
 def test_failed_sql_is_repaired_once(
-    executor: Executor, semantic_layer: DuckDBSemanticLayer
+    executor: Executor, semantic_layer: DuckDBSemanticLayer, value_index: CardinalityTieredValueIndex
 ) -> None:
     """A read-only SQL failure can be repaired and re-executed once."""
 
     client = MockLLM("SELECT SUM(revenue) AS value FROM v_sales")
-    result = SelfCorrector(executor, semantic_layer, client).execute(
+    result = SelfCorrector(executor, semantic_layer, value_index, client).execute(
         "SELECT wrong_column FROM v_sales", _spec()
     )
     assert result.final.success is True
@@ -84,12 +92,12 @@ def test_failed_sql_is_repaired_once(
 
 
 def test_retries_are_bounded_and_return_final_failure(
-    executor: Executor, semantic_layer: DuckDBSemanticLayer
+    executor: Executor, semantic_layer: DuckDBSemanticLayer, value_index: CardinalityTieredValueIndex
 ) -> None:
     """Two unsuccessful repairs are the maximum permitted cost and work."""
 
     client = MockLLM("SELECT still_wrong FROM v_sales")
-    result = SelfCorrector(executor, semantic_layer, client, max_retries=2).execute(
+    result = SelfCorrector(executor, semantic_layer, value_index, client, max_retries=2).execute(
         "SELECT wrong_column FROM v_sales", _spec()
     )
     assert result.final.success is False
@@ -99,11 +107,11 @@ def test_retries_are_bounded_and_return_final_failure(
 
 
 def test_no_llm_returns_initial_execution_failure(
-    executor: Executor, semantic_layer: DuckDBSemanticLayer
+    executor: Executor, semantic_layer: DuckDBSemanticLayer, value_index: CardinalityTieredValueIndex
 ) -> None:
     """Without a repair client, the original execution failure is retained."""
 
-    result = SelfCorrector(executor, semantic_layer).execute(
+    result = SelfCorrector(executor, semantic_layer, value_index).execute(
         "SELECT wrong_column FROM v_sales", _spec()
     )
     assert result.final.success is False
@@ -112,12 +120,12 @@ def test_no_llm_returns_initial_execution_failure(
 
 
 def test_repair_prompt_is_schema_grounded_and_contains_failure_context(
-    executor: Executor, semantic_layer: DuckDBSemanticLayer
+    executor: Executor, semantic_layer: DuckDBSemanticLayer, value_index: CardinalityTieredValueIndex
 ) -> None:
     """The LLM receives the safe schema plus the failed query and error as data."""
 
     client = MockLLM("SELECT SUM(revenue) FROM v_sales")
-    SelfCorrector(executor, semantic_layer, client).execute(
+    SelfCorrector(executor, semantic_layer, value_index, client).execute(
         "SELECT bad_col FROM v_sales", _spec()
     )
     assert client.last_call is not None
@@ -127,24 +135,24 @@ def test_repair_prompt_is_schema_grounded_and_contains_failure_context(
 
 
 def test_fenced_repair_is_cleaned_before_execution(
-    executor: Executor, semantic_layer: DuckDBSemanticLayer
+    executor: Executor, semantic_layer: DuckDBSemanticLayer, value_index: CardinalityTieredValueIndex
 ) -> None:
     """Markdown formatting does not prevent an otherwise valid repair from running."""
 
     client = MockLLM("```sql\nSELECT SUM(revenue) FROM v_sales\n```")
-    result = SelfCorrector(executor, semantic_layer, client).execute(
+    result = SelfCorrector(executor, semantic_layer, value_index, client).execute(
         "SELECT wrong_column FROM v_sales", _spec()
     )
     assert result.final.success is True
 
 
 def test_provider_failure_is_returned_in_repair_history(
-    executor: Executor, semantic_layer: DuckDBSemanticLayer
+    executor: Executor, semantic_layer: DuckDBSemanticLayer, value_index: CardinalityTieredValueIndex
 ) -> None:
     """An unavailable LLM cannot escape the correction boundary as an exception."""
 
     client = MockLLM(TimeoutError("provider timed out"))
-    result = SelfCorrector(executor, semantic_layer, client, max_retries=1).execute(
+    result = SelfCorrector(executor, semantic_layer, value_index, client, max_retries=1).execute(
         "SELECT wrong_column FROM v_sales", _spec()
     )
     assert result.final.success is False
@@ -156,15 +164,44 @@ def test_provider_failure_is_returned_in_repair_history(
 
 
 def test_unsafe_repair_is_rejected_before_execution(
-    executor: Executor, semantic_layer: DuckDBSemanticLayer
+    executor: Executor, semantic_layer: DuckDBSemanticLayer, value_index: CardinalityTieredValueIndex
 ) -> None:
     """A model cannot turn a failed read-only query into a mutating statement."""
 
     client = MockLLM("DROP TABLE targets")
-    result = SelfCorrector(executor, semantic_layer, client, max_retries=1).execute(
+    result = SelfCorrector(executor, semantic_layer, value_index, client, max_retries=1).execute(
         "SELECT wrong_column FROM v_sales", _spec()
     )
     assert result.final.success is False
     assert len(result.attempts) == 1
     assert result.repair_errors
     assert "SELECT or WITH" in result.repair_errors[0]
+
+
+def test_empty_result_triggers_repair_for_aggregate(
+    executor: Executor, semantic_layer: DuckDBSemanticLayer, value_index: CardinalityTieredValueIndex
+) -> None:
+    """An empty result triggers repair if the operation is aggregate."""
+    
+    client = MockLLM("SELECT SUM(revenue) FROM v_sales")
+    # This query runs successfully but 'month=999' returns [null] in DuckDB (an empty result)
+    result = SelfCorrector(executor, semantic_layer, value_index, client).execute(
+        "SELECT SUM(revenue) FROM v_sales WHERE month = '999'", _spec()
+    )
+    assert result.retries_used == 1
+    assert client.call_count == 1
+    assert "returned exactly 0 rows" in client.last_call["user"]
+
+
+def test_empty_result_is_accepted_for_compare(
+    executor: Executor, semantic_layer: DuckDBSemanticLayer, value_index: CardinalityTieredValueIndex
+) -> None:
+    """An empty result does not trigger repair if the operation is compare."""
+    
+    client = MockLLM("SELECT 1")
+    spec = AnalyticalSpec(operation="compare", metrics=["revenue"])
+    result = SelfCorrector(executor, semantic_layer, value_index, client).execute(
+        "SELECT SUM(revenue) FROM v_sales WHERE month = '999'", spec
+    )
+    assert result.retries_used == 0
+    assert client.call_count == 0

@@ -14,6 +14,10 @@ short sentences: first, what the user asked for; second, how the answer was
 computed and its confidence. Do not invent facts, use Markdown, or mention
 internal Python or SQL field names. Mention defaults or repairs only when the
 summary reports them. Keep the explanation to 40 words or fewer.
+
+CRITICAL RULE FOR EMPTY RESULTS (row_count is 0):
+If row_count is 0 and the operation is 'compare', explicitly state that no rows matched and this is a valid result (e.g., all targets were met).
+If row_count is 0 and the operation is NOT 'compare', explicitly state that you ran the query but found no data, suggest the data might use a different format, and ask the user to clarify.
 """
 
 

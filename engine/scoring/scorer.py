@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+import logging
+from langsmith import traceable
 
 import pandas as pd
 
 from engine.interfaces import SemanticLayerProtocol
-from engine.execution.executor import ExecutionResult
+from engine.execution.executor import ExecutionResult, is_empty_result
 from engine.types import AnalyticalSpec, TaggedQuery
 
 
@@ -66,6 +68,7 @@ class ConfidenceScorer:
             "targets",
         }
 
+    @traceable
     def score(
         self,
         tagged: TaggedQuery,
@@ -173,7 +176,7 @@ class ConfidenceScorer:
     def _score_plausibility(result_df: pd.DataFrame | None, retries_used: int) -> float:
         """Lower confidence for empty results and for results that needed repair."""
 
-        base = 1.0 if result_df is not None and not result_df.empty else 0.4
+        base = 0.4 if is_empty_result(result_df) else 1.0
         retries = max(0, retries_used)
         return max(0.0, base - min(0.3, 0.15 * retries))
 

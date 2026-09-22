@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from langsmith import traceable
 import re
 from typing import Protocol
 
@@ -28,6 +29,7 @@ class Explainer:
     def __init__(self, llm_client: ExplanationClient | None = None) -> None:
         self._llm = llm_client
 
+    @traceable
     def explain(
         self,
         tagged: TaggedQuery,
@@ -40,7 +42,7 @@ class Explainer:
         template_path_used: bool,
         result_count: int | None,
         feedback_applied: bool = False,
-    ) -> str:
+    ) -> dict[str, str]:
         """Return an LLM explanation when valid, otherwise a factual template fallback."""
 
         confidence = max(0.0, min(1.0, confidence))
@@ -67,8 +69,12 @@ class Explainer:
             sql_path,
             result_count,
             feedback_applied,
+            spec.operation,
         )
-        return f"{understood} {generated}"
+        return {
+            "understood": understood,
+            "generated": generated
+        }
 
     def _explain_via_llm(
         self,
@@ -80,7 +86,7 @@ class Explainer:
         sql_path: str,
         result_count: int | None,
         feedback_applied: bool,
-    ) -> str | None:
+    ) -> dict[str, str] | None:
         """Generate and validate concise prose, returning ``None`` on a safe fallback."""
 
         try:
@@ -107,7 +113,7 @@ class Explainer:
             return None
 
     @classmethod
-    def _clean_llm_explanation(cls, raw: str) -> str | None:
+    def _clean_llm_explanation(cls, raw: str) -> dict[str, str] | None:
         """Accept only concise two-sentence plain text from the LLM boundary."""
 
         if not isinstance(raw, str):
@@ -126,7 +132,10 @@ class Explainer:
             or any(marker in text for marker in ("#", "*", "- "))
         ):
             return None
-        return text
+        return {
+            "understood": sentences[0],
+            "generated": sentences[1]
+        }
 
     def _describe_understanding(self, tagged: TaggedQuery, spec: AnalyticalSpec) -> str:
         """Describe intent exclusively from the grounded analytical specification."""
@@ -196,12 +205,23 @@ class Explainer:
         sql_path: str,
         result_count: int | None,
         feedback_applied: bool,
+        operation: str,
     ) -> str:
         """Describe only the real construction, execution, and confidence facts."""
 
         repair_text = "no repairs" if retries_used == 0 else f"{retries_used} repair attempt(s)"
-        row_text = "no result" if result_count is None else f"{result_count} row(s)"
-        feedback_text = " A verified feedback correction was applied" if feedback_applied else ""
+        
+        if result_count is None:
+            row_text = "no result due to an error"
+        elif result_count == 0:
+            if operation == "compare":
+                row_text = "0 rows. No rows matched this criteria, which is a valid result (e.g., all targets were met)"
+            else:
+                row_text = "0 rows. I ran the query but found no data. It's possible the data uses a different format. Could you clarify?"
+        else:
+            row_text = f"{result_count} row(s)"
+
+        feedback_text = " A verified feedback correction was applied." if feedback_applied else ""
         return (
             f"I generated the SQL with {spec_path} and {sql_path}, executed it with "
             f"{repair_text}, and returned {row_text}.{feedback_text} Confidence is {confidence:.2f}."
