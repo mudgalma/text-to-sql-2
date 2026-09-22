@@ -1,6 +1,7 @@
-"""Optional Anthropic-backed structured specification builder."""
+"""LLM-backed analytical specification builder using tool calling."""
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Literal
 
@@ -18,46 +19,87 @@ from engine.types import (
     TimeConstraint,
 )
 
-
 LOGGER = logging.getLogger(__name__)
 
 
-class FilterOutput(BaseModel):
-    """Structured filter returned by the optional LLM path."""
+# ---------------------------------------------------------------------------
+# Output schema — defines exactly what JSON the LLM must return.
+# ---------------------------------------------------------------------------
 
-    column: str
-    operator: str
-    value: Any
+class FilterOutput(BaseModel):
+    """A WHERE-clause filter on a single schema column."""
+    column: str = Field(description="Exact schema column name to filter on")
+    operator: str = Field(description="SQL operator: =, !=, >, <, >=, <=, IN, LIKE")
+    value: Any = Field(description="The filter value")
 
 
 class MetricFilterOutput(BaseModel):
-    """Structured aggregate filter returned by the optional LLM path."""
-
-    metric: str
-    operator: str
+    """A HAVING-clause filter on an aggregated metric."""
+    metric: str = Field(description="Metric name (e.g. revenue, profit)")
+    operator: str = Field(description="SQL operator")
     target_value: float | None = None
     target_metric: str | None = None
 
 
+class TimeConstraintOutput(BaseModel):
+    """A time period constraint."""
+    raw: str = Field(description="Raw period string from the user query, e.g. '2', 'February', '2024-02'")
+    column: str = Field(
+        default="order_date",
+        description="Schema column to apply this filter to. Use 'month' for month-level, 'order_date' for date-level."
+    )
+    resolution: Literal[
+        "EXACT_PERIOD", "LATEST_PERIOD", "PERIOD_OVER_PERIOD", "ALL_PERIODS"
+    ] = Field(default="EXACT_PERIOD")
+
+
+class TimeComparisonOutput(BaseModel):
+    """A period-over-period comparison."""
+    baseline: TimeConstraintOutput
+    target: TimeConstraintOutput | None = None
+    delta_type: Literal["CUSTOM", "MOM", "YOY"] = "CUSTOM"
+
+
 class AnalyticalSpecOutput(BaseModel):
-    """Strict structured model accepted from the optional LLM path."""
+    """The analytical specification to build from the user query."""
 
-    operation: Literal["aggregate", "rank", "compare", "trend"]
-    metrics: list[str]
-    group_by: list[str] = Field(default_factory=list)
-    partition_by: list[str] = Field(default_factory=list)
-    limit: int | None = None
-    transforms: list[Literal["contribution_pct", "yoy", "mom", "rolling_avg"]] = Field(default_factory=list)
-    filters: list[FilterOutput] = Field(default_factory=list)
-    metric_filters: list[MetricFilterOutput] = Field(default_factory=list)
-    order_by: dict[str, str] | None = None
-    time_window: dict[str, str] | None = None
-    time_comparison: dict[str, Any] | None = None
-    defaults_applied: list[str] = Field(default_factory=list)
+    operation: Literal["aggregate", "rank", "compare", "trend"] = Field(
+        default="aggregate",
+        description="Query type: aggregate (sum/avg), rank (top-N), compare (vs target), trend (over time)"
+    )
+    metrics: list[str] = Field(description="List of metric names e.g. ['revenue', 'profit']")
+    group_by: list[str] = Field(
+        default_factory=list,
+        description="Dimension columns to GROUP BY"
+    )
+    partition_by: list[str] = Field(
+        default_factory=list,
+        description="Dimensions to partition within for window functions (e.g. rank within group)"
+    )
+    limit: int | None = Field(default=None, description="TOP-N limit for rank queries")
+    transforms: list[
+        Literal["contribution_pct", "yoy", "mom", "rolling_avg"]
+    ] = Field(default_factory=list, description="Post-aggregation transforms to apply")
+    filters: list[FilterOutput] = Field(default_factory=list, description="WHERE clause filters")
+    metric_filters: list[MetricFilterOutput] = Field(default_factory=list, description="HAVING clause filters")
+    order_by: dict[str, str] | None = Field(
+        default=None,
+        description="e.g. {'metric': 'revenue', 'direction': 'DESC'}"
+    )
+    time_window: TimeConstraintOutput | None = Field(default=None, description="Time period filter")
+    time_comparison: TimeComparisonOutput | None = Field(default=None, description="Period-over-period comparison")
+    defaults_applied: list[str] = Field(
+        default_factory=list,
+        description="List 'default_metric' here if no metric was mentioned in the query"
+    )
 
+
+# ---------------------------------------------------------------------------
+# Builder
+# ---------------------------------------------------------------------------
 
 class LLMSpecBuilder:
-    """Build a spec through an injected Anthropic client, with one tool fallback."""
+    """Build an AnalyticalSpec via a single tool-call to the LLM."""
 
     MODEL = "anthropic/claude-3-haiku"
 
@@ -66,81 +108,67 @@ class LLMSpecBuilder:
         self._sl = semantic_layer
 
     def build(self, tagged: TaggedQuery) -> AnalyticalSpec | None:
-        """Try structured parsing, then one tool-use fallback on any client failure."""
-
-        try:
-            response = self._client.beta.chat.completions.parse(
-                model=self.MODEL,
-                messages=[
-                    {"role": "system", "content": build_system_prompt(self._sl)},
-                    {"role": "user", "content": build_user_prompt(tagged)}
-                ],
-                response_format=AnalyticalSpecOutput,
-            )
-            return self._to_spec(response.choices[0].message.parsed)
-        except Exception:
-            LOGGER.warning("llm_structured_build_failed: falling back to tool use.")
-            return self._build_via_tool_use(tagged)
-
-    def _build_via_tool_use(self, tagged: TaggedQuery) -> AnalyticalSpec | None:
-        """Use an explicit tool schema once when structured parsing is unavailable."""
-
+        """Ask the LLM to fill the AnalyticalSpec tool schema and convert the result."""
         try:
             response = self._client.chat.completions.create(
                 model=self.MODEL,
                 messages=[
-                    {"role": "system", "content": build_system_prompt(self._sl)},
-                    {"role": "user", "content": build_user_prompt(tagged)}
+                    {"role": "system", "content": self._system_prompt()},
+                    {"role": "user", "content": build_user_prompt(tagged)},
                 ],
-                tools=[self._tool_definition()],
+                tools=[{
+                    "type": "function",
+                    "function": {
+                        "name": "build_analytical_spec",
+                        "description": "Build a structured analytical specification from the tagged query.",
+                        "parameters": AnalyticalSpecOutput.model_json_schema(),
+                    }
+                }],
                 tool_choice={"type": "function", "function": {"name": "build_analytical_spec"}},
+                temperature=0.0,
             )
-            message = response.choices[0].message
-            if message.tool_calls:
-                import json
-                return self._to_spec(json.loads(message.tool_calls[0].function.arguments))
+            tool_calls = response.choices[0].message.tool_calls
+            if not tool_calls:
+                LOGGER.warning("llm_build_failed: no tool call returned")
+                return None
+            raw = json.loads(tool_calls[0].function.arguments)
+            return self._to_spec(raw)
+        except Exception as exc:
+            LOGGER.warning("llm_build_failed: %s", exc)
             return None
-        except Exception:
-            LOGGER.warning("llm_tool_build_failed: all fallbacks failed.")
-            return None
+
+    def _system_prompt(self) -> str:
+        """Inject schema context so the LLM can use correct column names."""
+        base = build_system_prompt(self._sl)
+        schema_cols = list(self._sl.get_view_schema().keys())
+        return (
+            f"{base}\n\n"
+            f"Available schema columns: {schema_cols}\n"
+            f"For time_window: use column='month' for month-number filters (e.g. month 2 = February), "
+            f"column='order_date' for full date filters. "
+            f"Set 'raw' to the exact period from the user query."
+        )
 
     @staticmethod
-    def _tool_definition() -> dict[str, Any]:
-        """Return the tool schema for providers without parse support."""
-
-        return {
-            "type": "function",
-            "function": {
-                "name": "build_analytical_spec",
-                "description": "Return one grounded analytical specification.",
-                "parameters": AnalyticalSpecOutput.model_json_schema(),
-            }
-        }
-
-    @staticmethod
-    def _to_spec(output: AnalyticalSpecOutput | dict[str, Any]) -> AnalyticalSpec | None:
-        """Validate provider data and convert it to domain data contracts."""
-
+    def _to_spec(data: dict[str, Any]) -> AnalyticalSpec | None:
+        """Validate LLM output and convert to domain types."""
         try:
-            parsed = (
-                output
-                if isinstance(output, AnalyticalSpecOutput)
-                else AnalyticalSpecOutput.model_validate(output)
-            )
+            parsed = AnalyticalSpecOutput.model_validate(data)
             order_by = OrderSpec(**parsed.order_by) if parsed.order_by else None
-            time_window = TimeConstraint(**parsed.time_window) if parsed.time_window else None
+            time_window = (
+                TimeConstraint(**parsed.time_window.model_dump())
+                if parsed.time_window else None
+            )
             comparison = (
                 TimeComparison(
-                    baseline=TimeConstraint(**parsed.time_comparison["baseline"]),
+                    baseline=TimeConstraint(**parsed.time_comparison.baseline.model_dump()),
                     target=(
-                        TimeConstraint(**parsed.time_comparison["target"])
-                        if parsed.time_comparison.get("target")
-                        else None
+                        TimeConstraint(**parsed.time_comparison.target.model_dump())
+                        if parsed.time_comparison.target else None
                     ),
-                    delta_type=parsed.time_comparison.get("delta_type", "CUSTOM"),
+                    delta_type=parsed.time_comparison.delta_type,
                 )
-                if parsed.time_comparison
-                else None
+                if parsed.time_comparison else None
             )
             return AnalyticalSpec(
                 operation=parsed.operation,
@@ -148,13 +176,15 @@ class LLMSpecBuilder:
                 group_by=parsed.group_by,
                 partition_by=parsed.partition_by,
                 order_by=order_by,
-                filters=[Filter(**item.model_dump()) for item in parsed.filters],
-                metric_filters=[MetricFilter(**item.model_dump()) for item in parsed.metric_filters],
+                filters=[Filter(**f.model_dump()) for f in parsed.filters],
+                metric_filters=[MetricFilter(**mf.model_dump()) for mf in parsed.metric_filters],
                 limit=parsed.limit,
                 transforms=parsed.transforms,
                 time_window=time_window,
                 time_comparison=comparison,
                 defaults_applied=parsed.defaults_applied,
             )
-        except (KeyError, TypeError, ValidationError, ValueError):
+        except (KeyError, TypeError, ValidationError, ValueError) as exc:
+            print("llm_spec_conversion_failed:", exc)
+            LOGGER.warning("llm_spec_conversion_failed: %s", exc)
             return None

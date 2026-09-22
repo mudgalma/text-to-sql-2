@@ -36,26 +36,27 @@ class SpecBuilder:
         candidate = build(tagged) if callable(build) else None
         if not isinstance(candidate, AnalyticalSpec):
             return None
-        return candidate if self._grounding_ok(candidate, tagged) and self._structurally_valid(candidate) else None
+        ok_grounding = self._grounding_ok(candidate, tagged)
+        ok_structural = self._structurally_valid(candidate)
+        return candidate if ok_grounding and ok_structural else None
 
     def _grounding_ok(self, spec: AnalyticalSpec, tagged: TaggedQuery) -> bool:
-        """Reject specs that mention untagged schema entities or invalid fields."""
+        """Verify the LLM spec uses valid schema names from the data dictionary."""
 
-        metrics = {span.canonical for span in tagged.spans if span.role == "metric"}
-        dimensions = {span.canonical for span in tagged.spans if span.role == "dimension"}
-        allowed_metrics = metrics | {self._sl.get_default_metric()}
-        allowed_dimensions = dimensions | {"year"}
-        filter_columns = dimensions | {
-            span.matched_column for span in tagged.spans if span.role == "value" and span.matched_column
-        }
+        allowed_metrics = set(self._sl.get_metric_names()) | {self._sl.get_default_metric()}
+        allowed_dimensions = set(self._sl.get_dimension_names()) | {"year", "quarter", "month"}
+        
+        # The LLM can filter on any dimension or known schema column.
+        valid_columns = allowed_dimensions | set(self._sl.get_view_schema().keys())
+
         valid_order = spec.order_by is None or spec.order_by.metric in allowed_metrics
-        valid_filters = all(item.column in filter_columns for item in spec.filters)
+        valid_filters = all(item.column in valid_columns for item in spec.filters)
         valid_metric_filters = all(
             item.metric in allowed_metrics
             and (item.target_metric is None or item.target_metric == self._sl.get_target_column(item.metric))
             for item in spec.metric_filters
         )
-        valid_time = spec.time_window is None or self._sl.get_time_column(spec.time_window.raw) == spec.time_window.column
+        valid_time = spec.time_window is None or spec.time_window.column in valid_columns
         return (
             set(spec.metrics).issubset(allowed_metrics)
             and set(spec.group_by).issubset(allowed_dimensions)

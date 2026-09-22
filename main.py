@@ -63,20 +63,22 @@ def load_queries(path_value: str | Path) -> list[str]:
     return queries
 
 
-def run_pipeline(
-    dataset_dir: str | Path = "dataset",
-    feedback_path: str | Path | None = None,
-    explanation_client: ExplanationClient | None = None,
-) -> list[dict[str, Any]]:
-    """Run all queries, optionally using an injected LLM explanation client."""
-
-    data_dir = Path(dataset_dir).expanduser().resolve()
-    layer = DuckDBSemanticLayer(
-        data_dir / "sales_data.csv",
-        data_dir / "targets.csv",
-        data_dir / "data_dictionary.json",
-    )
-    try:
+class TextToSQLEngine:
+    """Encapsulates the state and components of the Text-to-SQL engine."""
+    
+    def __init__(
+        self,
+        dataset_dir: str | Path = "dataset",
+        feedback_path: str | Path | None = None,
+        explanation_client: ExplanationClient | None = None,
+    ) -> None:
+        self.data_dir = Path(dataset_dir).expanduser().resolve()
+        self.layer = DuckDBSemanticLayer(
+            self.data_dir / "sales_data.csv",
+            self.data_dir / "targets.csv",
+            self.data_dir / "data_dictionary.json",
+        )
+        
         llm_client = None
         adapter = None
         api_key = os.environ.get("OPEN_ROUTER_KEY") or os.environ.get("OPENROUTER_API_KEY")
@@ -85,32 +87,51 @@ def run_pipeline(
             llm_client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
             adapter = OpenRouterAdapter(llm_client)
 
-        tagger = Tagger(layer, CardinalityTieredValueIndex(layer))
+        self.tagger = Tagger(self.layer, CardinalityTieredValueIndex(self.layer))
         
-        llm_builder = LLMSpecBuilder(llm_client, layer) if llm_client else None
-        spec_builder = SpecBuilder(layer, llm_builder=llm_builder)
+        llm_builder = LLMSpecBuilder(llm_client, self.layer) if llm_client else None
+        self.spec_builder = SpecBuilder(self.layer, llm_builder=llm_builder)
         
-        generator = SQLGenerator(layer, llm_client=adapter)
-        executor = Executor(layer)
-        corrector = SelfCorrector(executor, layer, llm_client=adapter)
-        scorer = ConfidenceScorer(layer)
-        explainer = Explainer(explanation_client or adapter)
-        feedback = FeedbackStore(feedback_path or data_dir / "feedback_log.csv")
+        self.generator = SQLGenerator(self.layer, llm_client=adapter)
+        self.executor = Executor(self.layer)
+        self.corrector = SelfCorrector(self.executor, self.layer, llm_client=adapter)
+        self.scorer = ConfidenceScorer(self.layer)
+        self.explainer = Explainer(explanation_client or adapter)
+        self.feedback = FeedbackStore(feedback_path or self.data_dir / "feedback_log.csv")
+
+    def run_query(self, query: str) -> dict[str, Any]:
+        """Execute a single query through the pipeline."""
+        return _run_query(
+            query,
+            self.tagger,
+            self.spec_builder,
+            self.generator,
+            self.corrector,
+            self.scorer,
+            self.explainer,
+            self.feedback,
+        )
+
+    def close(self) -> None:
+        """Close the underlying database connection."""
+        self.layer.close()
+
+
+def run_pipeline(
+    dataset_dir: str | Path = "dataset",
+    feedback_path: str | Path | None = None,
+    explanation_client: ExplanationClient | None = None,
+) -> list[dict[str, Any]]:
+    """Run all queries in batch mode."""
+
+    engine = TextToSQLEngine(dataset_dir, feedback_path, explanation_client)
+    try:
         return [
-            _run_query(
-                query,
-                tagger,
-                spec_builder,
-                generator,
-                corrector,
-                scorer,
-                explainer,
-                feedback,
-            )
-            for query in load_queries(data_dir / "nl_queries.json")
+            engine.run_query(query)
+            for query in load_queries(engine.data_dir / "nl_queries.json")
         ]
     finally:
-        layer.close()
+        engine.close()
 
 
 def _run_query(
