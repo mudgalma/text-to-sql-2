@@ -480,7 +480,21 @@ uv run python -m eval.langsmith_eval
 
 ---
 
-## 🔄 Feedback Loop
+## 🔄 Feedback Loop (UI & Naïve RAG)
+
+The system features a dual-layer feedback loop that allows the engine to learn from manual corrections directly in the browser. 
+
+### Layer 1: The Exact Match Cache
+When you ask a question in the UI, the backend first checks `dataset/feedback_log.csv` for an exact, normalized match. If a match is found, the engine completely bypasses the LLM and instantly returns your manually corrected SQL.
+
+### Layer 2: RAG-based Few-Shot Retry
+If the question is new, the LLM attempts to generate SQL with a **clean prompt** (to ensure the baseline performance is never degraded by edge cases). However, if the LLM generates invalid SQL that fails validation or execution, the `RobustCorrector` takes over for a repair loop. 
+
+During this retry, the engine uses **Naïve RAG (Retrieval-Augmented Generation)** to search the `feedback_log.csv` for similar past mistakes. It dynamically injects these past corrections into the repair prompt as a `<past_corrections>` block, teaching the LLM how to fix its specific error before trying again.
+
+### How to test it in the UI
+1. **Test the Cache**: Ask a question (e.g., *"What is the total revenue?"*). In the results panel, click **Correct this answer**, type in your custom SQL, and submit. Ask the same question again—the engine will instantly return your custom SQL.
+2. **Test the Retry**: To test the Naïve RAG, you must ask a question confusing enough that the LLM fails its initial attempt, triggering the `RobustCorrector`. Alternatively, just run `uv run python eval/runner.py --test-set eval/test_set_extended.json`, which automatically tests complex queries that trigger the repair loop!
 
 ```mermaid
 sequenceDiagram
@@ -494,14 +508,17 @@ sequenceDiagram
         F-->>P: Return corrected SQL
         P-->>U: Result with feedback applied
     else No match
-        P->>P: Run full pipeline
+        P->>P: Run initial generation (Clean Prompt)
+        alt Generation Fails Validation
+            P->>F: Retrieve similar past corrections (Naïve RAG)
+            F-->>P: Return past corrections
+            P->>P: Run repair loop with Few-Shot examples
+        end
         P-->>U: Result + explanation
-        U->>F: Optional - Submit correction CSV
-        Note over F: query and corrected_sql columns required
+        U->>P: Optional - Click "Correct this answer" in UI
+        P->>F: Save to feedback_log.csv
     end
 ```
-
-The optional `feedback_log.csv` must have `query` and `corrected_sql` columns. **Only exact normalized query matches** are applied automatically — similar entries remain available for human review via `retrieve_similar()`.
 
 ---
 
