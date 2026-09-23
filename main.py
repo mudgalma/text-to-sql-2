@@ -95,6 +95,7 @@ class TextToSQLEngine:
                 self._llm,
                 DirectConfidenceScorer(),
                 sql_system_prompt=self._generator.build_system_prompt,
+                feedback_store=self._feedback_store,
             )
             if self._llm is not None
             else None
