@@ -37,7 +37,7 @@ This project converts **natural-language analytics questions** (e.g., *"Top 2 ci
 
 The system uses two LLM calls per query — intent analysis and SQL generation — with deterministic validation, execution, and confidence scoring between them. LLM where judgment is needed; code where correctness is provable.
 
-![Pipeline Architecture](pipeline_architecture.jpg)
+![Pipeline Architecture](pipeline_architecture.png)
 
 ```
 "Total sales in India for March"
