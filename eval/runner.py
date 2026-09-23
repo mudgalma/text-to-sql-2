@@ -330,7 +330,7 @@ def main() -> None:
         sys.path.insert(0, str(PROJECT_ROOT))
     from main import TextToSQLEngine
 
-    engine = TextToSQLEngine()
+    engine = TextToSQLEngine(feedback_path="dataset/feedback_log.csv")
     try:
         print_summary(run_eval(engine.run_query, test_set_path=args.test_set))
     finally:
