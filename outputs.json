@@ -1,0 +1,199 @@
+[
+  {
+    "query": "Total sales in India for March",
+    "generated_logic": "SELECT SUM(revenue) AS value \nFROM v_sales\nWHERE country = 'India' AND month = '2024-03'",
+    "result": [
+      {
+        "value": 108.0
+      }
+    ],
+    "confidence_score": 1.0,
+    "explanation": {
+      "understood": "Total sales in India for March",
+      "generated": "Generated validated read-only SQL. Confidence: 1.00."
+    }
+  },
+  {
+    "query": "Top 2 cities by profit",
+    "generated_logic": "SELECT city, SUM(profit) AS value \nFROM v_sales\nGROUP BY city\nORDER BY value DESC\nLIMIT 2",
+    "result": [
+      {
+        "city": "New York",
+        "value": 200.0
+      },
+      {
+        "city": "San Francisco",
+        "value": 180.0
+      }
+    ],
+    "confidence_score": 1.0,
+    "explanation": {
+      "understood": "Top two cities ranked by profit.",
+      "generated": "Generated validated read-only SQL. Confidence: 1.00."
+    }
+  },
+  {
+    "query": "Average order value by region",
+    "generated_logic": "WITH orders AS (\n  SELECT region, COUNT(order_id) AS orders, SUM(revenue) AS revenue\n  FROM v_sales\n  GROUP BY region\n)\nSELECT region, revenue / orders AS value\nFROM orders",
+    "result": [
+      {
+        "region": "APAC",
+        "value": 118.5
+      },
+      {
+        "region": "NA",
+        "value": 1087.4666666666667
+      },
+      {
+        "region": "EMEA",
+        "value": 799.3333333333334
+      }
+    ],
+    "confidence_score": 0.977,
+    "explanation": {
+      "understood": "Average order value calculated for each region.",
+      "generated": "Generated validated read-only SQL. Confidence: 0.98."
+    }
+  },
+  {
+    "query": "Which region missed its target in Feb?",
+    "generated_logic": "WITH actual AS (\n  SELECT region, SUM(revenue) AS actual \n  FROM v_sales\n  WHERE month = '2024-02'\n  GROUP BY region\n),\ntargets AS (\n  SELECT region, target_revenue\n  FROM targets\n  WHERE month = '2024-02'\n)\nSELECT \n  t.region,\n  COALESCE(a.actual, 0) AS actual,\n  CAST(t.target_revenue AS DOUBLE) AS target\nFROM targets t\nLEFT JOIN actual a ON t.region = a.region\nWHERE COALESCE(a.actual, 0) < CAST(t.target_revenue AS DOUBLE)",
+    "result": [
+      {
+        "region": "APAC",
+        "actual": 75.0,
+        "target": 6000.0
+      },
+      {
+        "region": "EMEA",
+        "actual": 255.0,
+        "target": 7500.0
+      },
+      {
+        "region": "NA",
+        "actual": 1116.0,
+        "target": 9500.0
+      }
+    ],
+    "confidence_score": 1.0,
+    "explanation": {
+      "understood": "Uses the default metric revenue.",
+      "generated": "Generated validated read-only SQL. Confidence: 1.00."
+    }
+  },
+  {
+    "query": "Sales contribution % by category",
+    "generated_logic": "SELECT \n  product_category,\n  ROUND(100.0 * SUM(revenue) / SUM(SUM(revenue)) OVER (), 2) AS pct\nFROM v_sales\nWHERE product_category IN ('Furniture', 'Office Supplies', 'Technology')\nGROUP BY product_category\nORDER BY pct DESC",
+    "result": [
+      {
+        "product_category": "Technology",
+        "pct": 88.06
+      },
+      {
+        "product_category": "Furniture",
+        "pct": 9.44
+      },
+      {
+        "product_category": "Office Supplies",
+        "pct": 2.5
+      }
+    ],
+    "confidence_score": 1.0,
+    "explanation": {
+      "understood": "Revenue share by product category as percentages.",
+      "generated": "Generated validated read-only SQL. Confidence: 1.00."
+    }
+  },
+  {
+    "query": "Top product in each region",
+    "generated_logic": "WITH ranked AS (\n  SELECT region, product_name, SUM(revenue) AS value,\n         ROW_NUMBER() OVER (PARTITION BY region ORDER BY SUM(revenue) DESC, product_name ASC) AS rnk\n  FROM v_sales\n  GROUP BY region, product_name\n)\nSELECT region, product_name, value\nFROM ranked\nWHERE rnk = 1",
+    "result": [
+      {
+        "region": "APAC",
+        "product_name": "Ergo Chair",
+        "value": 324.0
+      },
+      {
+        "region": "NA",
+        "product_name": "Dell XPS",
+        "value": 2068.0
+      },
+      {
+        "region": "EMEA",
+        "product_name": "Samsung Galaxy",
+        "value": 1288.0
+      }
+    ],
+    "confidence_score": 1.0,
+    "explanation": {
+      "understood": "Uses the default metric revenue.",
+      "generated": "Generated validated read-only SQL. Confidence: 1.00."
+    }
+  },
+  {
+    "query": "YoY growth in revenue",
+    "generated_logic": "WITH prev_year AS (\n  SELECT year, SUM(revenue) AS prev_year_revenue\n  FROM v_sales\n  WHERE year = 2023\n  GROUP BY year\n),\ncurr_year AS (\n  SELECT year, SUM(revenue) AS curr_year_revenue\n  FROM v_sales\n  WHERE year = 2024\n  GROUP BY year\n)\nSELECT \n  100.0 * (curr_year.curr_year_revenue - prev_year.prev_year_revenue) / NULLIF(prev_year.prev_year_revenue, 0) AS value\nFROM curr_year\nCROSS JOIN prev_year",
+    "result": [],
+    "confidence_score": 1.0,
+    "explanation": {
+      "understood": "Year-over-year growth in revenue.",
+      "generated": "Generated validated read-only SQL. Confidence: 1.00."
+    }
+  },
+  {
+    "query": "Revenue of top 3 customers per region",
+    "generated_logic": "WITH ranked AS (\n  SELECT region, customer_id, SUM(revenue) AS value,\n         ROW_NUMBER() OVER (PARTITION BY region ORDER BY SUM(revenue) DESC, customer_id ASC) AS rnk\n  FROM v_sales\n  GROUP BY region, customer_id\n)\nSELECT region, customer_id, value\nFROM ranked\nWHERE rnk <= 3",
+    "result": [
+      {
+        "region": "APAC",
+        "customer_id": "C001",
+        "value": 324.0
+      },
+      {
+        "region": "APAC",
+        "customer_id": "C003",
+        "value": 75.0
+      },
+      {
+        "region": "APAC",
+        "customer_id": "C006",
+        "value": 75.0
+      },
+      {
+        "region": "NA",
+        "customer_id": "C009",
+        "value": 2068.0
+      },
+      {
+        "region": "NA",
+        "customer_id": "C004",
+        "value": 1116.0
+      },
+      {
+        "region": "NA",
+        "customer_id": "C007",
+        "value": 78.4
+      },
+      {
+        "region": "EMEA",
+        "customer_id": "C008",
+        "value": 1288.0
+      },
+      {
+        "region": "EMEA",
+        "customer_id": "C002",
+        "value": 855.0
+      },
+      {
+        "region": "EMEA",
+        "customer_id": "C005",
+        "value": 255.0
+      }
+    ],
+    "confidence_score": 1.0,
+    "explanation": {
+      "understood": "Top 3 customers by revenue within each region.",
+      "generated": "Generated validated read-only SQL. Confidence: 1.00."
+    }
+  }
+]
