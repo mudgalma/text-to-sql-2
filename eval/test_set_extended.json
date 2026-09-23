@@ -1,0 +1,179 @@
+[
+  {
+    "id": "t01", "category": "top_n_within_groups", "difficulty": "moderate",
+    "query": "Top 2 products by revenue in each customer segment",
+    "expected": {"kind": "rows", "values": {
+      "Consumer|Samsung Galaxy": 1288.0, "Consumer|MacBook Air": 1116.0,
+      "Corporate|Dell XPS": 2068.0, "Corporate|iPhone 14": 855.0,
+      "Home Office|A4 Paper Pack": 78.4, "Home Office|Binder Set": 75.0
+    }}
+  },
+  {
+    "id": "t02", "category": "top_n_within_groups", "difficulty": "moderate",
+    "query": "Best month by profit in each region",
+    "expected": {"kind": "rows", "values": {
+      "APAC|2024-01": 55.0, "EMEA|2024-01": 150.0, "NA|2024-02": 200.0
+    }, "alternatives": [{
+      "APAC|2024-01": 55.0, "EMEA|2024-01": 150.0, "NA|2024-03": 200.0
+    }]}
+  },
+  {
+    "id": "t03", "category": "top_n_within_groups", "difficulty": "moderate",
+    "query": "Top customer per region by profit",
+    "expected": {"kind": "rows", "values": {
+      "APAC|C001": 42.0, "EMEA|C002": 150.0, "NA|C004": 200.0
+    }}
+  },
+  {
+    "id": "t04", "category": "top_n_within_groups", "difficulty": "hard",
+    "query": "Best subcategory by revenue in each product category",
+    "expected": {"kind": "rows", "values": {
+      "Furniture|Chairs": 324.0, "Technology|Laptops": 3184.0, "Office Supplies|Paper": 78.4
+    }}
+  },
+  {
+    "id": "t05", "category": "top_n_within_groups", "difficulty": "moderate",
+    "query": "Top 2 products by profit in each region",
+    "expected": {"kind": "rows", "values": {
+      "APAC|Ergo Chair": 42.0, "APAC|Binder Set": 25.0,
+      "EMEA|iPhone 14": 150.0, "EMEA|Samsung Galaxy": 120.0,
+      "NA|MacBook Air": 200.0, "NA|Dell XPS": 180.0
+    }}
+  },
+  {
+    "id": "t06", "category": "top_n_within_groups", "difficulty": "hard",
+    "query": "Highest profit product per customer segment",
+    "expected": {"kind": "rows", "values": {
+      "Consumer|MacBook Air": 200.0, "Corporate|Dell XPS": 180.0, "Home Office|Binder Set": 25.0
+    }}
+  },
+  {
+    "id": "c01", "category": "contribution", "difficulty": "moderate",
+    "query": "Revenue share by month",
+    "expected": {"kind": "rows_with_pct", "values": {"2024-03": 57.75, "2024-02": 23.57, "2024-01": 18.68}}
+  },
+  {
+    "id": "c02", "category": "contribution", "difficulty": "moderate",
+    "query": "Profit share by region",
+    "expected": {"kind": "rows_with_pct", "values": {"NA": 49.88, "EMEA": 39.90, "APAC": 10.22}}
+  },
+  {
+    "id": "c03", "category": "contribution", "difficulty": "moderate",
+    "query": "Revenue contribution of each country",
+    "expected": {"kind": "rows_with_pct", "values": {"USA": 53.18, "France": 21.00, "Germany": 13.94, "India": 7.73, "UK": 4.16}}
+  },
+  {
+    "id": "c04", "category": "contribution", "difficulty": "moderate",
+    "query": "Revenue share by customer segment",
+    "expected": {"kind": "rows_with_pct", "values": {"Corporate": 51.80, "Consumer": 45.69, "Home Office": 2.50}}
+  },
+  {
+    "id": "c05", "category": "contribution", "difficulty": "hard",
+    "query": "Revenue contribution by product subcategory",
+    "expected": {"kind": "rows_with_pct", "values": {"Laptops": 51.91, "Phones": 34.94, "Chairs": 5.28, "Tables": 4.16, "Paper": 1.28, "Binders": 1.22, "Accessories": 1.22}}
+  },
+  {
+    "id": "c06", "category": "contribution", "difficulty": "hard",
+    "query": "Profit contribution by city",
+    "expected": {"kind": "rows_with_pct", "values": {"New York": 24.94, "San Francisco": 22.44, "Berlin": 18.70, "Paris": 14.96, "London": 6.23, "Mumbai": 5.24, "Delhi": 3.12, "Chicago": 2.49, "Bangalore": 1.87}}
+  },
+  {
+    "id": "n01", "category": "nested_logic", "difficulty": "moderate",
+    "query": "Which region has the highest average order value?",
+    "expected": {"kind": "rows_ordered", "values": [["NA", 1087.4667]]}
+  },
+  {
+    "id": "n02", "category": "nested_logic", "difficulty": "moderate",
+    "query": "Which category generates the most profit in NA?",
+    "expected": {"kind": "rows_ordered", "values": [["Technology", 380.0]]}
+  },
+  {
+    "id": "n03", "category": "nested_logic", "difficulty": "moderate",
+    "query": "Which customer spent the most?",
+    "expected": {"kind": "rows_ordered", "values": [["C009", 2068.0]]}
+  },
+  {
+    "id": "n04", "category": "nested_logic", "difficulty": "hard",
+    "query": "Average revenue per order for the top region by total revenue",
+    "expected": {"kind": "scalar", "value": 1087.4667}
+  },
+  {
+    "id": "n05", "category": "nested_logic", "difficulty": "hard",
+    "query": "Which month had the highest average order value?",
+    "expected": {"kind": "rows_ordered", "values": [["2024-03", 885.6]]}
+  },
+  {
+    "id": "n06", "category": "nested_logic", "difficulty": "moderate",
+    "query": "Which product category has the most orders?",
+    "expected": {"kind": "rows_ordered", "values": [["Technology", 5]]}
+  },
+  {
+    "id": "p01", "category": "compare", "difficulty": "moderate",
+    "query": "Which regions missed their March target?",
+    "expected": {"kind": "set", "values": ["APAC", "EMEA", "NA"]}
+  },
+  {
+    "id": "p02", "category": "compare", "difficulty": "hard",
+    "query": "What is the total shortfall across all regions for February?",
+    "expected": {"kind": "scalar", "value": 21554.0}
+  },
+  {
+    "id": "p03", "category": "compare", "difficulty": "hard",
+    "query": "Which month had the best total attainment across all regions?",
+    "expected": {"kind": "rows_ordered", "values": [["2024-03", 14.06]]}
+  },
+  {
+    "id": "p04", "category": "compare", "difficulty": "hard",
+    "query": "Which region has the highest attainment percentage in January?",
+    "expected": {"kind": "rows_ordered", "values": [["EMEA", 10.69]]}
+  },
+  {
+    "id": "p05", "category": "compare", "difficulty": "moderate",
+    "query": "Which regions beat their target in any month?",
+    "expected": {"kind": "set", "values": []}
+  },
+  {
+    "id": "p06", "category": "compare", "difficulty": "hard",
+    "query": "What is the highest attainment percentage any region achieved in any month?",
+    "expected": {"kind": "scalar", "value": 21.46}
+  },
+  {
+    "id": "m01", "category": "time_based", "difficulty": "easy",
+    "query": "Which month had the highest revenue?",
+    "expected": {"kind": "rows_ordered", "values": [["2024-03", 3542.4]]}
+  },
+  {
+    "id": "m02", "category": "time_based", "difficulty": "hard",
+    "query": "What is the percent change in revenue from January to March?",
+    "expected": {"kind": "scalar", "value": 209.11, "tolerance": 0.5}
+  },
+  {
+    "id": "m03", "category": "time_based", "difficulty": "moderate",
+    "query": "What is the average monthly profit?",
+    "expected": {"kind": "scalar", "value": 267.3333}
+  },
+  {
+    "id": "m03_b", "category": "time_based", "difficulty": "moderate",
+    "query": "What is the average monthly profit for APAC and NA?",
+    "expected": {"kind": "scalar", "value": 96.4}
+  },
+  {
+    "id": "m04", "category": "time_based", "difficulty": "easy",
+    "query": "What is the total revenue for February and March combined?",
+    "expected": {"kind": "scalar", "value": 4988.4}
+  },
+  {
+    "id": "m05", "category": "time_based", "difficulty": "moderate",
+    "query": "Which month had the lowest revenue?",
+    "expected": {"kind": "rows_ordered", "values": [["2024-01", 1146.0]]}
+  },
+  {
+    "id": "x01", "category": "ambitious", "difficulty": "hard",
+    "query": "Give me sales of all countries and all categories",
+    "expected": {"kind": "rows", "allow_extra_zero_rows": true, "values": {
+      "India|Furniture": 324.0, "India|Technology": 75.0, "India|Office Supplies": 75.0,
+      "Germany|Technology": 855.0, "USA|Technology": 3184.0, "USA|Office Supplies": 78.4,
+      "UK|Furniture": 255.0, "France|Technology": 1288.0
+    }}
+  }
+]

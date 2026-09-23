@@ -33,6 +33,38 @@ def test_check_supports_each_result_shape() -> None:
     assert check({"kind": "rejected"}, None)
 
 
+def test_check_supports_tolerance_ties_and_zero_filled_group_rows() -> None:
+    """Extended cases can declare valid rounding, ties, and zero-filled rows."""
+
+    assert check(
+        {"kind": "scalar", "value": 10.0, "tolerance": 0.5},
+        [{"value": 10.4}],
+    )
+    assert check(
+        {
+            "kind": "rows",
+            "values": {"NA|2024-02": 200.0},
+            "alternatives": [{"NA|2024-03": 200.0}],
+        },
+        [{"region": "NA", "month": "2024-03", "profit": 200.0}],
+    )
+    assert check(
+        {
+            "kind": "rows",
+            "values": {"USA|Technology": 10.0},
+            "allow_extra_zero_rows": True,
+        },
+        [
+            {"country": "USA", "product_category": "Technology", "revenue": 10.0},
+            {"country": "USA", "product_category": "Furniture", "revenue": 0.0},
+        ],
+    )
+    assert check(
+        {"kind": "rows", "values": {"Consumer|MacBook Air": 200.0}},
+        [{"product_name": "MacBook Air", "customer_segment": "Consumer", "value": 200.0}],
+    )
+
+
 def test_run_eval_persists_results_and_captures_failures(tmp_path: Path) -> None:
     """A run writes JSON output and isolates a failed pipeline query."""
 

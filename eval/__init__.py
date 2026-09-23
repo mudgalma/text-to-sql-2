@@ -1,1 +1,1 @@
-"""Reusable evaluation harness for the Text-to-SQL pipeline."""
+"""Versioned local and LangSmith evaluation tools for the analytics engine."""

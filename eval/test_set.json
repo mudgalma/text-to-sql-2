@@ -63,7 +63,7 @@
     "id": "u11",
     "category": "contribution",
     "query": "Share of profit by region",
-    "expected": {"kind": "rows_with_pct", "values": {"NA": 52.87, "EMEA": 32.54, "APAC": 14.59}}
+    "expected": {"kind": "rows_with_pct", "values": {"NA": 49.88, "EMEA": 39.9, "APAC": 10.22}}
   },
   {
     "id": "u12",

@@ -4,7 +4,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from engine.semantic_layer import DuckDBSemanticLayer
-from engine.value_index import CardinalityTieredValueIndex
 
 
 def main() -> None:
@@ -28,13 +27,10 @@ def main() -> None:
         dict_json=dataset / "data_dictionary.json",
     )
     try:
-        index = CardinalityTieredValueIndex(layer)
         total = layer.execute("SELECT SUM(revenue) AS revenue FROM v_sales").iloc[0, 0]
         print(f"metrics: {layer.get_metric_names()}")
         print(f"dimensions: {layer.get_dimension_names()}")
         print(f"sum(revenue): {total}")
-        print(f"indexed columns: {index.indexed_columns()}")
-        print(f"India matches: {index.match('India')}")
     finally:
         layer.close()
 

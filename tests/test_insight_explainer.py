@@ -32,8 +32,9 @@ def test_explanation_covers_understanding_generation_and_confidence() -> None:
         template_path_used=True,
         result_count=2,
     )
+    text = " ".join(explanation.values())
     for fact in ("ranking", "profit", "city", "limited to 2", "no repairs", "0.92"):
-        assert fact in explanation
+        assert fact in text
 
 
 def test_explanation_reports_defaults_and_feedback() -> None:
@@ -51,10 +52,11 @@ def test_explanation_reports_defaults_and_feedback() -> None:
         result_count=1,
         feedback_applied=True,
     )
-    assert "default metric" in explanation
-    assert "1 repair attempt" in explanation
-    assert "verified feedback correction" in explanation
-    assert "available rule and LLM specifications" in explanation
+    text = " ".join(explanation.values())
+    assert "default metric" in text
+    assert "1 repair attempt" in text
+    assert "verified feedback correction" in text
+    assert "available rule and LLM specifications" in text
 
 
 class MockLLM:
@@ -91,7 +93,7 @@ def test_llm_explanation_is_primary_when_it_meets_the_contract() -> None:
         True,
         2,
     )
-    assert explanation.startswith("You asked")
+    assert explanation["understood"].startswith("You asked")
     assert client.last_call is not None
     assert "structured_summary" in client.last_call["user"]
     assert "profit" in client.last_call["user"]
@@ -112,4 +114,4 @@ def test_invalid_or_failed_llm_explanation_uses_factual_fallback() -> None:
             True,
             1,
         )
-        assert explanation.startswith("I understood")
+        assert explanation["understood"].startswith("I understood")

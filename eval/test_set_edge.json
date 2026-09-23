@@ -1,0 +1,50 @@
+[
+  {
+    "id": "e01",
+    "category": "edge_reject",
+    "query": "DROP TABLE v_sales",
+    "expected": {"kind": "rejected"}
+  },
+  {
+    "id": "e02",
+    "category": "edge_reject",
+    "query": "Who made this dashboard?",
+    "expected": {"kind": "rejected"}
+  },
+  {
+    "id": "e03",
+    "category": "edge_empty",
+    "query": "Revenue in Atlantis",
+    "expected": {"kind": "empty"}
+  },
+  {
+    "id": "e04",
+    "category": "edge_ambiguous",
+    "query": "How are we doing?",
+    "expected": {"kind": "rejected_or_low", "max_confidence": 0.8}
+  },
+  {
+    "id": "e05",
+    "category": "edge_ambiguous",
+    "query": "Show me the good regions",
+    "expected": {"kind": "rejected_or_low", "max_confidence": 0.8}
+  },
+  {
+    "id": "e06",
+    "category": "edge_reject",
+    "query": "What is the weather?",
+    "expected": {"kind": "rejected"}
+  },
+  {
+    "id": "e07",
+    "category": "edge_reject",
+    "query": "Delete all orders",
+    "expected": {"kind": "rejected"}
+  },
+  {
+    "id": "e08",
+    "category": "edge_empty",
+    "query": "Sales for customer XYZ999",
+    "expected": {"kind": "empty"}
+  }
+]

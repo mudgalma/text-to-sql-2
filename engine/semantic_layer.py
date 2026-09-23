@@ -178,7 +178,12 @@ class DuckDBSemanticLayer:
         """Register validated CSV files as all-string DuckDB tables."""
 
         self._create_table_from_csv("raw_sales", self._sales_csv)
-        self._create_table_from_csv("targets", self._targets_csv)
+        escaped_path = str(self._targets_csv).replace("'", "''")
+        self.conn.execute(
+            "CREATE OR REPLACE TABLE targets AS "
+            "SELECT region, month, CAST(target_revenue AS DOUBLE) AS target_revenue "
+            f"FROM read_csv_auto('{escaped_path}', header = true, all_varchar = true)"
+        )
 
     def _create_table_from_csv(self, table_name: str, source: Path) -> None:
         """Create a table from a local validated CSV path without type inference."""
@@ -401,7 +406,8 @@ class DuckDBSemanticLayer:
         try:
             return self.conn.execute(sql).df()
         except duckdb.Error as error:
-            raise SemanticLayerError("Analytics query execution failed.") from error
+            detail = str(error)[:2_000]
+            raise SemanticLayerError(f"Analytics query execution failed: {detail}") from error
 
     def get_metric_names(self) -> list[str]:
         """Return the configured metric names."""
@@ -424,6 +430,19 @@ class DuckDBSemanticLayer:
 
         dimensions = self._dict["dimensions"]
         return [dimension for dimension in dimensions if isinstance(dimension, str)]
+
+    def get_dimension_values(self, dimension: str, limit: int = 50) -> list[str]:
+        """Return bounded, ordered values for one configured dimension."""
+
+        if dimension not in self.get_dimension_names():
+            raise SemanticLayerError("Requested dimension is not configured.")
+        if not isinstance(limit, int) or not 1 <= limit <= 100:
+            raise SemanticLayerError("Dimension-value limit must be between 1 and 100.")
+        rows = self.conn.execute(
+            f'SELECT DISTINCT "{dimension}" FROM {self.VIEW_NAME} '
+            f'WHERE "{dimension}" IS NOT NULL ORDER BY "{dimension}" LIMIT {limit}'
+        ).fetchall()
+        return [str(row[0]) for row in rows]
 
     def get_synonyms(self) -> dict[str, str]:
         """Return a defensive copy of metric synonyms."""

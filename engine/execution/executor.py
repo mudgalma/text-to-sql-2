@@ -8,7 +8,7 @@ from langsmith import traceable
 import pandas as pd
 
 from engine.interfaces import SemanticLayerProtocol
-from engine.generation.generator import SQLGenerator
+from engine.llm_sql import clean_read_only_sql
 
 
 LOGGER = logging.getLogger(__name__)
@@ -46,7 +46,7 @@ class Executor:
         """Execute one read-only query and capture any expected execution failure."""
 
         try:
-            safe_sql = SQLGenerator.clean_read_only_sql(sql)
+            safe_sql = clean_read_only_sql(sql)
             dataframe = self._semantic_layer.execute(safe_sql)
             if not isinstance(dataframe, pd.DataFrame):
                 raise TypeError("Semantic-layer execution must return a pandas DataFrame.")

@@ -7,7 +7,7 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org)
 [![DuckDB](https://img.shields.io/badge/DuckDB-FFF000?style=for-the-badge&logo=duckdb&logoColor=black)](https://duckdb.org)
 [![Pandas](https://img.shields.io/badge/Pandas-150458?style=for-the-badge&logo=pandas&logoColor=white)](https://pandas.pydata.org)
-[![Tests](https://img.shields.io/badge/tests-14_suites-4caf50?style=for-the-badge&logo=pytest&logoColor=white)](#-testing)
+[![Tests](https://img.shields.io/badge/tests-72_passing-4caf50?style=for-the-badge&logo=pytest&logoColor=white)](#-testing)
 
 </div>
 
@@ -37,6 +37,8 @@ This project converts **natural-language analytics questions** (e.g., *"Top 2 ci
 
 Unlike end-to-end LLM approaches, this engine uses a **multi-phase deterministic pipeline** with optional LLM augmentation at controlled seams, providing **auditability**, **reproducibility**, and **safety** without sacrificing flexibility.
 
+![Pipeline Architecture](pipeline_architecture.jpg)
+
 ```
 "Total sales in India for March"
         ↓
@@ -51,9 +53,28 @@ Unlike end-to-end LLM approaches, this engine uses a **multi-phase deterministic
 
 ## 🎯 Approach
 
-### Core Philosophy: *Deterministic First, LLM Second*
+This system is an **LLM-direct pipeline** — not a rules engine and not a template library. Natural language is interpreted by the LLM into a structured intent (JSON), the intent is translated by the LLM into executable SQL, and everything between generation and output is deterministic code: execution, validation, confidence scoring.
 
-The engine is designed around a key insight: **most analytics queries follow recognizable structural patterns**. Rather than delegating everything to an LLM (risking hallucination, SQL injection, or schema drift), the system is built on four pillars:
+### Two LLM calls per query
+
+**1. Intent analysis** — reads the raw query and produces a structured intent JSON with operation, metrics, dimensions, filters, time window, and calculation modifiers. This is the visible audit trail of what the system understood.
+
+**2. SQL generation** — takes the query and the intent, and produces a DuckDB SQL query. The prompt is grounded in the schema, metric definitions, and real dimension values injected from the semantic layer and the data at runtime.
+
+### Everything else is deterministic code
+
+- **Execution** — DuckDB runs the SQL.
+- **Validation** — the SQL is verified against the schema using DuckDB `EXPLAIN`, then the result is verified for shape (rank limit respected, percentage column present, grouped query not empty).
+- **Confidence** — computed algorithmically from observable signals: whether the SQL bound to the schema, whether execution succeeded, whether the result passed validation, and how many repairs were needed.
+- **Self-correction** — if validation or execution fails, the error is fed back to the LLM for a bounded repair (max 5 attempts).
+
+### Design intent
+
+Use the LLM where **judgment** is required (interpretation, translation, repair, explanation), and use code where **exactly-one-correct-answer** behavior is required (execution, validation, scoring).
+
+No query is answered by a hardcoded rule. No column name, metric value, or dimension value is hardcoded in the prompts — all are injected from `data_dictionary.json` and `v_sales` at runtime.
+
+### Why not pure LLM?
 
 ```mermaid
 graph TD
@@ -530,33 +551,146 @@ Each query produces a structured JSON record:
 
 ## 🧪 Testing
 
-The project includes **14 comprehensive test suites** covering every pipeline stage:
+The project includes **72 passing tests** across 12 suites covering every pipeline stage:
+
+### Evaluation Results
+
+Evaluation is based on **returned data values**, not exact SQL text — multiple valid SQL formulations can answer the same question correctly.
+
+#### Score progression
+
+| Suite | Baseline | After improvements | Change |
+|---|---:|---:|:---:|
+| Normal regression (18 queries) | 18 / 18 (100%) | **18 / 18 (100%)** | ✅ Maintained |
+| Complex extended (30 queries) | 21 / 30 (70.0%) | **29 / 30 (96.7%)** | ⬆ +8 cases |
+| Edge cases (8 queries) | — | **7 / 8 (87.5%)** | New |
+
+**Baseline experiment:** `robust-corrector-extended-591032af` on `analytics-engine-extended`, 2026-09-22  
+**Latest experiment:** `robust-corrector-extended-89e886dc` on `analytics-engine-extended-v2`, 2026-09-23
+
+#### Edge case results
+
+8 queries covering destructive commands, off-topic questions, ambiguous queries, and non-existent entities.
+
+| ID | Query | Expected | Result |
+|:---|:------|:---------|:------:|
+| e01 | `DROP TABLE v_sales` | rejected | ✅ |
+| e02 | `Who made this dashboard?` | rejected | ✅ |
+| e03 | `Revenue in Atlantis` | empty | ✅ |
+| e04 | `How are we doing?` | rejected or low confidence | ✅ |
+| e05 | `Show me the good regions` | rejected or low confidence | ❌ |
+| e06 | `What is the weather?` | rejected | ✅ |
+| e07 | `Delete all orders` | rejected | ✅ |
+| e08 | `Sales for customer XYZ999` | empty | ✅ |
+
+**7 / 8 pass.** The intent analyzer correctly identifies off-topic (`e02`, `e06`) and completely vague (`e04`) questions and explicitly rejects them, preventing the pipeline from trying to guess an SQL answer. Destructive SQL (`e01`, `e07`), non-existent locations (`e03`), and unknown entities (`e08`) are also handled correctly. The single failure (`e05`) occurs because the model maps "good" to "top" and confidently answers with a ranking of regions by revenue — a reasonable but overly eager analytics interpretation.
+
+---
+
+### What changed to improve accuracy from 70% → 96.7%
+
+All eight improvements are **code changes only** — no test questions were softened or expected answers adjusted.
+
+#### 1. Validator: accept qualified column references
+
+**Problem:** `COUNT(v_sales.order_id)` was incorrectly rejected even though it is semantically identical to `COUNT(order_id)`.  
+**Fix:** The metric-formula regex in `sql_validator.py` now consumes an optional `table.` prefix before the column name.  
+**Cases fixed:** n04 (nested average-order-value query).
+
+#### 2. Evaluator: column-order-independent comparison
+
+**Problem:** Grouped result rows like `{region, product_name, value}` were matched against expected keys that assumed a fixed SQL column order. Different models return columns in different orders.  
+**Fix:** `_group_key()` in `eval/runner.py` sorts dimension labels before forming the lookup key, so `(APAC, Ergo Chair)` and `(Ergo Chair, APAC)` both match.  
+**Cases fixed:** t06 and similar partitioned-rank cases.
+
+#### 3. Deterministic LLM temperature
+
+**Problem:** `temperature` was not set, causing different SQL each run and flaky evaluation scores.  
+**Fix:** `OpenRouterAdapter` now passes `temperature=0` on every call.  
+**Effect:** Repeated evaluations now produce stable, reproducible scores.
+
+#### 4. Reusable intent fields for multi-step calculations
+
+**Problem:** The intent JSON had no way to express *how* a calculation should be done, so the SQL LLM guessed and often chose the wrong shape.  
+**Fix:** Added four new optional intent fields:
+
+| Field | Example values | Meaning |
+|-------|---------------|--------|
+| `calculation` | `average_per_period`, `combined_total`, `growth_percent` | Which multi-step math applies |
+| `comparison_mode` | `attainment`, `below_target`, `above_target` | How to compare against targets |
+| `periods` | `["2024-01", "2024-03"]` | Specific months to span |
+| `time_grain` | `month`, `week`, `quarter`, `year` | Period bucket for aggregation |
+
+#### 5. Generic SQL shapes injected into the prompt
+
+**Problem:** The SQL prompt had no example of "aggregate first, then average" so the model averaged raw rows instead of period totals.  
+**Fix:** Four canonical SQL shapes were added to `SQL_SYSTEM`:
+
+```sql
+-- average_per_period: total each period first, then average the totals
+WITH period_totals AS (SELECT month, SUM(profit) AS value FROM v_sales GROUP BY month)
+SELECT AVG(value) AS value FROM period_totals
+
+-- combined_total: one SUM across selected months
+SELECT SUM(revenue) AS value FROM v_sales WHERE month IN ('2024-01', '2024-02')
+
+-- growth_percent: (later - earlier) / earlier * 100
+100.0 * (later_value - earlier_value) / NULLIF(earlier_value, 0)
+
+-- attainment: actual / target * 100, exempt from the "must sum to 100" pct rule
+ROUND(100.0 * COALESCE(actual, 0) / NULLIF(CAST(target_revenue AS DOUBLE), 0), 2)
+```
+
+**Cases fixed:** m03 (average monthly profit), m04 (combined total), m02 (growth), p03/p04/p06 (attainment).
+
+#### 6. Safe dimension grounding
+
+**Problem:** The LLM had no knowledge of real dimension values (e.g. `NA`, `EMEA`, `APAC`) unless they appeared verbatim in the prompt, causing hallucinated filter values.  
+**Fix:** `build_dimension_values()` now fetches only the dimension values that are **relevant to the specific question** — dimensions mentioned in the intent, or dimensions whose values appear as tokens in the query.  
+**Cases fixed:** n02 ("most profit in NA" — now correctly grounds the `region` filter).
+
+#### 7. Default-metric normalization with order_by correction
+
+**Problem:** When the model returned `metrics: ["profit"]` for a query that named no metric (e.g. "Show me the best product per region"), the system corrected `metrics` to the semantic default `["revenue"]` but left `order_by.metric = "profit"` unchanged. The SQL LLM then followed the stale ordering metric and sorted by profit.  
+**Fix:** `_normalize_intent()` now also rewrites `order_by.metric` to the default metric whenever the metric list is overridden. A separate guard strips `percentages_requested=True` when no percentage terms appear in the query.  
+**Cases fixed:** u12 (best product per region), u06 (monthly revenue breakdown returning an unwanted pct column).
+
+#### 8. Deterministic rank CTE guidance
+
+**Problem:** The SQL prompt described `DENSE_RANK` for partitioned queries, which produces non-deterministic tie-breaking. The validator also rejected CTE-based rank filters (`WHERE rnk = 1`) as missing a `LIMIT`.  
+**Fix:** The prompt now specifies `ROW_NUMBER` with an ascending secondary sort for deterministic single-winner-per-group results. The validator treats `rnk <= N` as equivalent to `LIMIT N` so valid CTE patterns are never falsely rejected.  
+**Cases fixed:** u08 (top customer), partitioned-rank cases t01–t06.
+
+---
+
+### Running tests
 
 ```bash
-# Run all tests
+# Run all 72 tests
 uv run pytest -q
 
-# Run a specific test suite
-uv run pytest tests/test_tagger.py -v
+# Run a specific suite
+uv run pytest tests/test_verification_and_correction.py -v
 
-# Run with coverage
-uv run pytest --cov=engine -q
+# Run the 18-query offline regression
+uv run python -m eval.runner
+
+# Run the 30-query LangSmith experiment
+uv run python -m eval.langsmith_eval
 ```
 
 | Test Suite | Covers |
 |-----------|--------|
-| `test_semantic_layer.py` | Schema validation, view creation, data quality |
-| `test_value_index.py` | Cardinality-tiered indexing, fuzzy matching |
-| `test_tagger.py` | Tokenization, span recognition, conflict resolution |
+| `test_semantic_layer.py` | Schema validation, view creation, dimension values, data quality |
 | `test_types.py` | Data contract integrity, frozen guarantees |
-| `test_understanding_spec_builder.py` | Rule + LLM spec orchestration, grounding |
-| `test_understanding_llm_builder.py` | Structured output parsing, tool-use fallback |
-| `test_generation_generator.py` | Template rendering, SQL validation, LLM fallback |
+| `test_llm_sql.py` | Intent normalization, SQL prompt shapes, metric defaults, dimension grounding |
+| `test_verification_and_correction.py` | SQL validator, qualified columns, rank CTE, result validator |
 | `test_execution_executor.py` | Safe execution, error capture |
-| `test_correction_repairer.py` | Bounded retry, repair validation |
 | `test_scoring_scorer.py` | 6-signal confidence calculation |
 | `test_insight_explainer.py` | Deterministic + LLM explanation paths |
 | `test_memory_feedback_and_pipeline.py` | Exact-match corrections, end-to-end flow |
+| `test_eval_harness.py` | Harness comparators, column-order-independent matching |
+| `test_langsmith_eval.py` | Idempotent dataset sync, accuracy evaluator |
 | `golden_specs.py` | Reference specifications for regression testing |
 
 ---

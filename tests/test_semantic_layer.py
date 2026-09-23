@@ -76,6 +76,22 @@ def test_semantic_layer_resolves_dependent_aggregate_metrics() -> None:
         layer.close()
 
 
+def test_semantic_layer_returns_bounded_dimension_values() -> None:
+    """Configured dimensions expose only real bounded values for prompt grounding."""
+
+    layer = DuckDBSemanticLayer(
+        DATASET / "sales_data.csv",
+        DATASET / "targets.csv",
+        DATASET / "data_dictionary.json",
+    )
+    try:
+        assert layer.get_dimension_values("region") == ["APAC", "EMEA", "NA"]
+        with pytest.raises(SemanticLayerError, match="not configured"):
+            layer.get_dimension_values("not_a_dimension")
+    finally:
+        layer.close()
+
+
 def test_semantic_layer_rejects_missing_source_file(tmp_path: Path) -> None:
     with pytest.raises(SemanticLayerError, match="missing or empty"):
         DuckDBSemanticLayer(
