@@ -51,6 +51,32 @@ class FeedbackStore:
             None,
         )
 
+    def save_correction(self, path_value: str | Path, query: str, corrected_sql: str) -> None:
+        """Append a new verified correction to the feedback CSV."""
+        
+        path = Path(path_value).expanduser().resolve()
+        
+        # Add to in-memory list first
+        new_entry = FeedbackEntry(query.strip(), corrected_sql.strip())
+        
+        # Avoid exact duplicates
+        normalized_query = self._normalize(query)
+        if any(self._normalize(entry.query) == normalized_query for entry in self._entries):
+            return
+            
+        self._entries.append(new_entry)
+        
+        # Append to CSV
+        file_exists = path.exists()
+        try:
+            with path.open(mode="a", encoding="utf-8-sig", newline="") as dest:
+                writer = csv.writer(dest)
+                if not file_exists:
+                    writer.writerow(["query", "corrected_sql"])
+                writer.writerow([new_entry.query, new_entry.corrected_sql])
+        except (csv.Error, OSError) as error:
+            raise FeedbackStoreError("Could not save to Feedback CSV.") from error
+
     def _load(self, path_value: str | Path) -> list[FeedbackEntry]:
         """Validate and load a small UTF-8 feedback CSV file."""
 

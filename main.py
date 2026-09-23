@@ -18,6 +18,7 @@ from engine.insight.message_builder import (
     unresolved_message,
 )
 from engine.llm_sql import IntentAnalyzer, SQLClient, SQLGenerator
+from engine.memory.feedback_store import FeedbackStore
 from engine.scoring.direct_scorer import DirectConfidenceScorer
 from engine.semantic_layer import DuckDBSemanticLayer
 
@@ -82,7 +83,8 @@ class TextToSQLEngine:
             self.data_dir / "targets.csv",
             self.data_dir / "data_dictionary.json",
         )
-        del feedback_path
+        self.feedback_path = Path(feedback_path).expanduser().resolve() if feedback_path else None
+        self._feedback_store = FeedbackStore(self.feedback_path) if self.feedback_path else None
         self._llm = llm_client or explanation_client or self._load_llm_client()
         self._intent = IntentAnalyzer(self._llm, self.layer) if self._llm is not None else None
         self._generator = SQLGenerator(self._llm, self.layer) if self._llm is not None else None
@@ -115,9 +117,39 @@ class TextToSQLEngine:
         )
         return OpenRouterAdapter(client)
 
+    def add_feedback(self, query: str, corrected_sql: str) -> None:
+        """Add a manual SQL correction for a query to the feedback CSV."""
+        
+        if not self._feedback_store or not self.feedback_path:
+            raise ValueError("No feedback_path was provided during engine initialization.")
+            
+        self._feedback_store.save_correction(self.feedback_path, query, corrected_sql)
+
     def run_query(self, query: str) -> dict[str, Any]:
         """Translate, validate, execute, and return one analytics query safely."""
 
+        # 1. Check Feedback Cache (Bypass LLM completely on exact match)
+        if self._feedback_store:
+            cached_sql = self._feedback_store.get_exact_correction(query)
+            if cached_sql:
+                # Execute cached SQL directly
+                executor = Executor(self.layer)
+                try:
+                    exec_result = executor.run(cached_sql)
+                    if not exec_result.success:
+                        return _failure_output(query, f"Cached SQL failed: {exec_result.error}")
+                        
+                    return {
+                        "query": query,
+                        "generated_logic": cached_sql,
+                        "result": exec_result.df.to_dict(orient="records") if exec_result.df is not None else [],
+                        "confidence_score": 1.0,
+                        "explanation": "Result served from verified feedback cache.",
+                    }
+                except Exception as e:
+                    return _failure_output(query, f"Cached SQL crashed: {e}")
+
+        # 2. Normal LLM Pipeline
         if self._intent is None or self._generator is None or self._corrector is None:
             return _failure_output(query, "No LLM provider is configured.")
         intent = self._intent.analyze(query)
