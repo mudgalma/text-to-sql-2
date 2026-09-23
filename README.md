@@ -151,14 +151,19 @@ graph TD
 ### High-Level Pipeline
 
 ```mermaid
-flowchart LR
-    Q[Query] -->|LLM| I[Intent]
-    I -->|LLM| S[SQL]
-    S -->|Code| V[Validate]
-    V -->|Code| E[Execute]
-    E -->|Code| C[Score]
-    C -->|LLM| X[Explain]
-    X --> J[JSON]
+flowchart TD
+    Q[User Query] --> A[Analyze Intent]
+    
+    A -->|Destructive/Vague| REJ[Reject Early]
+    A -->|Parse Error| RAG[RAG Repair Loop]
+    A -->|Valid JSON| G[Generate SQL]
+    
+    G --> V[Validate & Run SQL]
+    
+    V -->|DuckDB Crash| RAG
+    V -->|Success| R[Return Data]
+    
+    RAG -->|Inject Past Fixes| G
 ```
 
 ### Phase Responsibilities
@@ -181,11 +186,23 @@ flowchart LR
 | SQL Templates | Zero templates; LLM handles grammar |
 | Intent Routing | Handled purely by LLM reasoning |
 
+### The "Fail-Fast" Self-Healing Architecture
+
+Instead of relying on silent fallbacks or hardcoded rules when the LLM hallucinates, this engine uses a deterministic **Fail-Fast** approach paired with a **RAG Repair Loop**:
+
+1. **Intent Extraction**: The LLM parses the user's intent. If it hallucinates a metric (e.g. `omega_metric`), we **do not** silently override it. We let it pass through.
+2. **DuckDB Crash**: The generated SQL attempts to query the hallucinated metric. DuckDB predictably crashes (`Column not found`).
+3. **RAG Injection**: The crash triggers the `RobustCorrector`. It searches a local `feedback_log.csv` (using TF-IDF similarity) for past corrections matching the user's query or the error message.
+4. **Self-Healing**: The LLM is re-prompted with the exact DuckDB error + the injected human feedback, allowing it to successfully write the correct SQL on its second attempt.
+
 ### Three Output States
 
-1. **Success**: Valid JSON intent → Valid SQL → Results Returned
-2. **Rejection**: LLM explicitly returns `operation="reject"` for off-topic/vague queries
-3. **Fallback**: LLM fails to generate valid JSON/SQL → Empty result + 0.0 confidence
+1. **Success**: Valid Intent → Valid SQL (or repaired SQL) → Results Returned
+2. **Rejection**: LLM recognizes destructive intent (`delete`, `drop`) → Cleanly rejected
+3. **Unresolved**: Pipeline exhausted 5 repair attempts without success → Explainer returns polite error
+
+### LangSmith Traceability
+The entire pipeline is wrapped in `@traceable` decorators. Every query produces a deeply nested trace tree in LangSmith (`run_query` -> `analyze_intent` -> `correct_sql`), providing full visibility into every retry and LLM prompt.
 
 ---
 
