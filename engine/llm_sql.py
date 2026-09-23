@@ -86,15 +86,16 @@ Return only valid JSON:
 "periods":[],"time_grain":null,"tie_policy":null,"reasoning":"one sentence"}
 <examples>
 Q: Top 2 cities by profit
-{"operation":"rank","metrics":["profit"],"dimensions":["city"],"partition_by":[],"filters":[],"time_window":null,"percentages_requested":false,"rank_kind":"top_n","limit":2,"order_by":{"metric":"profit","direction":"DESC"},"transforms":[],"reasoning":"Top two cities by profit."}
+{"operation":"rank","metrics":["profit"],"dimensions":["city"],"partition_by":[],"filters":[],"time_window":null,"percentages_requested":false,"rank_kind":"top_n","limit":2,"order_by":{"metric":"profit","direction":"DESC"},"transforms":[],"reasoning":"Top two cities ranked by profit."}
 Q: Sales distribution across all months
-{"operation":"aggregate","metrics":["revenue"],"dimensions":["month"],"partition_by":[],"filters":[],"time_window":null,"percentages_requested":true,"rank_kind":null,"limit":null,"order_by":null,"transforms":[],"reasoning":"Monthly revenue as percentages."}
+{"operation":"aggregate","metrics":["revenue"],"dimensions":["month"],"partition_by":[],"filters":[],"time_window":null,"percentages_requested":true,"rank_kind":null,"limit":null,"order_by":null,"transforms":[],"reasoning":"Monthly revenue share as percentages."}
 Q: Who spent the most?
-{"operation":"rank","metrics":["revenue"],"dimensions":["customer_id"],"partition_by":[],"filters":[],"time_window":null,"percentages_requested":false,"rank_kind":"single_winner","limit":1,"order_by":{"metric":"revenue","direction":"DESC"},"transforms":[],"reasoning":"One customer with the highest revenue."}
+{"operation":"rank","metrics":["revenue"],"dimensions":["customer_id"],"partition_by":[],"filters":[],"time_window":null,"percentages_requested":false,"rank_kind":"single_winner","limit":1,"order_by":{"metric":"revenue","direction":"DESC"},"transforms":[],"reasoning":"Single customer with the highest revenue."}
 Q: Rank all products by profit
-{"operation":"rank","metrics":["profit"],"dimensions":["product_name"],"partition_by":[],"filters":[],"time_window":null,"percentages_requested":false,"rank_kind":"all_sorted","limit":null,"order_by":{"metric":"profit","direction":"DESC"},"transforms":[],"reasoning":"All products sorted by profit."}
+{"operation":"rank","metrics":["profit"],"dimensions":["product_name"],"partition_by":[],"filters":[],"time_window":null,"percentages_requested":false,"rank_kind":"all_sorted","limit":null,"order_by":{"metric":"profit","direction":"DESC"},"transforms":[],"reasoning":"All products sorted descending by profit."}
 </examples>
 No prose or Markdown."""
+
 
 
 SQL_SYSTEM = """You write one read-only DuckDB SQL query from a question and intent.

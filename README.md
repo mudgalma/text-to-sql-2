@@ -35,7 +35,7 @@
 
 This project converts **natural-language analytics questions** (e.g., *"Top 2 cities by profit"*, *"YoY growth in revenue"*) into **validated, read-only DuckDB SQL** and returns structured results with **confidence scores** and **human-readable explanations**.
 
-Unlike end-to-end LLM approaches, this engine uses a **multi-phase deterministic pipeline** with optional LLM augmentation at controlled seams, providing **auditability**, **reproducibility**, and **safety** without sacrificing flexibility.
+The system uses two LLM calls per query — intent analysis and SQL generation — with deterministic validation, execution, and confidence scoring between them. LLM where judgment is needed; code where correctness is provable.
 
 ![Pipeline Architecture](pipeline_architecture.jpg)
 
@@ -152,245 +152,40 @@ graph TD
 
 ```mermaid
 flowchart LR
-    subgraph Input
-        NL["Natural Language Query"]
-    end
-
-    subgraph Understanding
-        direction TB
-        SL["Semantic Layer"]
-        VI["Value Index"]
-        TAG["Tagger"]
-        SB["Spec Builder"]
-    end
-
-    subgraph Generation
-        direction TB
-        GEN["SQL Generator"]
-        FB["Feedback Store"]
-    end
-
-    subgraph Execution
-        direction TB
-        EXE["Executor"]
-        REP["Self-Corrector"]
-    end
-
-    subgraph Assessment
-        direction TB
-        SCO["Confidence Scorer"]
-        EXP["Explainer"]
-    end
-
-    subgraph Output
-        RES["Structured JSON Result"]
-    end
-
-    NL --> TAG
-    SL -.-> TAG
-    VI -.-> TAG
-    TAG --> SB
-    SL -.-> SB
-    SB --> GEN
-    FB -.-> GEN
-    SL -.-> GEN
-    GEN --> EXE
-    EXE --> REP
-    REP --> SCO
-    SCO --> EXP
-    EXP --> RES
+    Q[Query] -->|LLM| I[Intent]
+    I -->|LLM| S[SQL]
+    S -->|Code| V[Validate]
+    V -->|Code| E[Execute]
+    E -->|Code| C[Score]
+    C -->|LLM| X[Explain]
+    X --> J[JSON]
 ```
 
-### Phase-by-Phase Breakdown
+### Phase Responsibilities
 
-```mermaid
-flowchart TB
-    subgraph P1["Semantic Layer - Foundation"]
-        direction LR
-        CSV["sales_data.csv + targets.csv"] --> DUCK["DuckDB In-Memory"]
-        DICT["data_dictionary.json"] --> META["Metrics, Dimensions, Synonyms, Targets"]
-        DUCK --> VIEW["v_sales View - Typed + Normalized"]
-        META --> VIEW
-    end
+| Phase | Engine | Responsibility |
+|:------|:-------|:---------------|
+| Intent | LLM | Parse raw query into structured JSON intent |
+| Generation | LLM | Translate intent to DuckDB SQL |
+| Validation | Code | Reject non-SELECT/WITH statements via EXPLAIN |
+| Execution | Code | Run query and return dataframe |
+| Scoring | Code | Compute algorithmic confidence from pipeline signals |
+| Explanation | LLM | Summarize execution state into a short sentence |
 
-    subgraph P2["Value Index - Entity Recognition"]
-        direction LR
-        DIM["Dimension Columns"] --> CARD{"Cardinality <= 200?"}
-        CARD -->|Yes| EXACT["Full Index - All distinct values"]
-        CARD -->|No| SAMPLE["Sampled Index - Bounded to 1000"]
-        EXACT --> MATCH["3-Tier Matching: Exact, Alias, Fuzzy"]
-        SAMPLE --> MATCH
-    end
+### The "No Hardcoding" Guarantee
 
-    subgraph P3["Tagger - Lexical Analysis"]
-        direction LR
-        QUERY["Raw Query"] --> TOK["Tokenizer with word offsets"]
-        TOK --> SPAN["Longest-Match Span Scanner"]
-        SPAN --> RESOLVE["Conflict Resolution"]
-        RESOLVE --> TAGGED["TaggedQuery with Spans + Conflicts"]
-    end
+| Aspect | How it's handled |
+|:-------|:-----------------|
+| Dimensions & Metrics | Injected dynamically into prompts |
+| Value Matching | Injected dynamically (up to cardinality limits) |
+| SQL Templates | Zero templates; LLM handles grammar |
+| Intent Routing | Handled purely by LLM reasoning |
 
-    subgraph P4["Spec Builder - Intent Assembly"]
-        direction LR
-        RULE["Rule Builder - Pattern matching on role sequences"]
-        LLM_B["LLM Builder - Structured output, optional"]
-        RULE --> GROUND["Grounding Validation"]
-        LLM_B --> GROUND
-        GROUND --> SPEC["AnalyticalSpec - Composable intent"]
-    end
+### Three Output States
 
-    subgraph P5["SQL Generator - Template Engine"]
-        direction LR
-        TMPL["7 SQL Templates"]
-        LLM_F["LLM Fallback, optional"]
-        TMPL --> SAFE["Read-Only Validation"]
-        LLM_F --> SAFE
-        SAFE --> SQL["Validated DuckDB SQL"]
-    end
-
-    subgraph P6P7["Execute + Repair"]
-        direction LR
-        RUN["Execute SQL via DuckDB"]
-        RUN -->|Failure| RETRY{"Retries <= 2?"}
-        RETRY -->|Yes| REPAIR["LLM Repair, optional"]
-        REPAIR --> RUN
-        RETRY -->|No| FAIL["Return Last Result"]
-        RUN -->|Success| OK["ExecutionResult with DataFrame"]
-    end
-
-    subgraph P8P9["Score + Explain"]
-        direction LR
-        SIG["6 Weighted Signals"]
-        SIG --> CONF["Confidence 0.0 to 1.0"]
-        CONF --> EXPL["Explanation: LLM prose or Factual template"]
-    end
-
-    P1 --> P2
-    P2 --> P3
-    P3 --> P4
-    P4 --> P5
-    P5 --> P6P7
-    P6P7 --> P8P9
-```
-
-### Type System & Data Flow
-
-The pipeline is unified by a rich, frozen type system that flows between stages:
-
-```mermaid
-classDiagram
-    class TaggedQuery {
-        +str raw_query
-        +list tokens
-        +list spans
-        +list conflicts
-    }
-
-    class Token {
-        +str text
-        +int start
-        +int end
-        +str canonical
-        +TokenType role
-    }
-
-    class EntitySpan {
-        +tuple tokens
-        +str canonical
-        +TokenType role
-        +str matched_column
-        +MatchQuality match_quality
-    }
-
-    class AnalyticalSpec {
-        +OperationType operation
-        +list metrics
-        +list transforms
-        +list group_by
-        +list partition_by
-        +OrderSpec order_by
-        +list filters
-        +list metric_filters
-        +int limit
-        +TimeConstraint time_window
-        +TimeComparison time_comparison
-        +list defaults_applied
-    }
-
-    class ExecutionResult {
-        +bool success
-        +str sql
-        +DataFrame df
-        +str error
-    }
-
-    class ConfidenceBreakdown {
-        +float execution_success
-        +float schema_validity
-        +float nlu_confidence
-        +float agreement_signal
-        +float result_plausibility
-        +float defaults_score
-        +float final
-    }
-
-    TaggedQuery *-- Token
-    TaggedQuery *-- EntitySpan
-    EntitySpan *-- Token
-    AnalyticalSpec *-- Filter
-    AnalyticalSpec *-- MetricFilter
-    AnalyticalSpec *-- OrderSpec
-    AnalyticalSpec *-- TimeConstraint
-    AnalyticalSpec *-- TimeComparison
-
-    TaggedQuery --> AnalyticalSpec : SpecBuilder
-    AnalyticalSpec --> ExecutionResult : Generator + Executor
-    ExecutionResult --> ConfidenceBreakdown : Scorer
-```
-
-### LLM Integration Points
-
-The engine defines **four optional LLM seams**, each with strict contracts and fallback behavior:
-
-```mermaid
-flowchart TB
-    subgraph S1["1 - Structured Spec Parsing"]
-        direction LR
-        A1["OpenRouter (OpenAI SDK)"] --> B1["Pydantic Validation"]
-        B1 --> C1["Grounding Check"]
-        C1 -->|Pass| D1["Use LLM Spec"]
-        C1 -->|Fail| E1["Fall back to Rules"]
-    end
-
-    subgraph S2["2 - SQL Generation Fallback"]
-        direction LR
-        A2["Novel Spec Shape"] --> B2["LLM SQL Generation"]
-        B2 --> C2["Read-Only Validation"]
-        C2 -->|Safe| D2["Use LLM SQL"]
-        C2 -->|Unsafe| E2["Reject + Error"]
-    end
-
-    subgraph S3["3 - Bounded SQL Repair"]
-        direction LR
-        A3["Execution Failure"] --> B3["Max 2 LLM Repairs"]
-        B3 --> C3["Re-validate + Re-execute"]
-        C3 -->|Still fails| D3["Return Last Result"]
-    end
-
-    subgraph S4["4 - Explanation Prose"]
-        direction LR
-        A4["Pipeline Facts"] --> B4["LLM Prose Rewrite"]
-        B4 --> C4["Max 40 words, 2 sentences"]
-        C4 -->|Valid| D4["Use LLM Prose"]
-        C4 -->|Invalid| E4["Deterministic Template"]
-    end
-
-    S1 ~~~ S2
-    S2 ~~~ S3
-    S3 ~~~ S4
-```
-
-> **Key Guarantee**: The entire pipeline runs without any API credentials. LLM features enhance — but never gate — core functionality.
+1. **Success**: Valid JSON intent → Valid SQL → Results Returned
+2. **Rejection**: LLM explicitly returns `operation="reject"` for off-topic/vague queries
+3. **Fallback**: LLM fails to generate valid JSON/SQL → Empty result + 0.0 confidence
 
 ---
 
@@ -398,61 +193,51 @@ flowchart TB
 
 ```
 text-tosql/
-├── main.py                          # CLI entry point & pipeline orchestrator
+├── main.py
 ├── dataset/
-│   ├── sales_data.csv               # Source sales transactions
-│   ├── targets.csv                  # Revenue targets for comparison queries
-│   ├── data_dictionary.json         # Metrics, dimensions, synonyms, mappings
-│   └── nl_queries.json              # 8 natural-language query batch
+│   ├── sales_data.csv
+│   ├── targets.csv
+│   ├── data_dictionary.json
+│   └── nl_queries.json
 ├── engine/
-│   ├── interfaces.py                # Protocol contracts (SemanticLayer, ValueIndex, Tagger)
-│   ├── types.py                     # Frozen data contracts (Token, EntitySpan, AnalyticalSpec, etc.)
-│   ├── semantic_layer.py            # DuckDB schema, view registration, data quality
-│   ├── tagger.py                    # Deterministic lexical tagger with conflict resolution
-│   ├── value_index.py               # Cardinality-tiered exact/fuzzy value lookup
-│   ├── understanding/
-│   │   ├── spec_builder.py          # Orchestrates rule + optional LLM spec construction
-│   │   ├── rule_builder.py          # Deterministic role-sequence pattern matcher
-│   │   ├── llm_builder.py           # Optional OpenRouter structured output builder
-│   │   ├── temporal_anchor.py       # Time constraint resolution
-│   │   └── prompts.py               # LLM prompt templates
-│   ├── generation/
-│   │   ├── generator.py             # SQL generation with template engine + LLM fallback
-│   │   ├── templates.py             # 7 validated SQL grammar templates
-│   │   └── prompts.py               # SQL generation prompt templates
+│   ├── interfaces.py
+│   ├── types.py
+│   ├── semantic_layer.py
+│   ├── llm_sql.py              # ← the whole pipeline
 │   ├── execution/
-│   │   └── executor.py              # Safe SQL execution with structured results
+│   │   └── executor.py
 │   ├── correction/
-│   │   ├── repairer.py              # Bounded self-correction (max 2 retries)
-│   │   └── prompts.py               # SQL repair prompt templates
+│   │   └── repairer.py
 │   ├── scoring/
-│   │   └── scorer.py                # 6-signal weighted confidence scorer
+│   │   └── scorer.py
 │   ├── insight/
-│   │   ├── explainer.py             # Deterministic + optional LLM explanation
-│   │   └── prompts.py               # Explanation prompt templates
+│   │   └── explainer.py
 │   └── memory/
-│       └── feedback_store.py        # Verified exact-match correction store
-├── tests/                           # 14 comprehensive test suites
+│       └── feedback_store.py
+├── eval/
+│   ├── runner.py
+│   ├── test_set_unseen.json
+│   ├── test_set_complex.json
+│   └── test_set_edge.json
+├── tests/
 ├── scripts/
-│   └── verify_setup.py              # Environment verification script
-├── pyproject.toml                   # Project metadata & dependencies
-└── requirements.txt                 # Pinned dependency ranges
+└── pyproject.toml
 ```
 
 ---
 
 ## ⚖️ Trade-offs
 
-### Deterministic Rules vs. LLM Flexibility
+### LLM-Direct Design Tradeoffs
 
-The design occupies a deliberate position in the **coverage vs. control** trade-off space:
-
-| Position | Coverage | Control | Notes |
-|----------|----------|---------|-------|
-| **Pure LLM Pipeline** | High | Low | Handles novel queries but hallucinates, no safety guarantees |
-| **This Engine (with LLM seams)** | High | High | Best of both — deterministic core with bounded LLM augmentation |
-| **This Engine (deterministic only)** | Medium | Very High | Fully offline, fully reproducible, zero API cost |
-| **Regex Only** | Low | Very High | Brittle, covers very few query shapes |
+| Decision | Chosen | Alternative | Rationale |
+|:---------|:-------|:------------|:----------|
+| Pipeline style | LLM-direct (2 calls) | Rules + templates | LLM generalizes; no code change for new synonyms |
+| Intent representation | Structured JSON | Free-form LLM output | Auditable — the intent is visible proof of understanding |
+| Validation | DuckDB `EXPLAIN` | Regex allowlist | DuckDB's parser is authoritative |
+| Confidence | Algorithmic | LLM self-reported | Auditable — no fabricated numbers |
+| Self-correction | Bounded (max 5) | Unbounded or none | Balances coverage vs. cost |
+| Examples | In prompt | None | Shape guidance is standard practice |
 
 ### Design Decisions
 
@@ -543,7 +328,7 @@ Each query produces a structured JSON record:
     { "city": "London", "value": 38190.75 }
   ],
   "confidence_score": 0.93,
-  "explanation": "I understood this as a ranking query for profit, grouped by city, limited to 2. I generated the SQL with the rule-based specification and a validated SQL template, executed it with no repairs, and returned 2 row(s). Confidence is 0.93."
+  "explanation": "I understood this as a ranking query for profit, grouped by city, limited to 2. I interpreted your question into a structured intent, generated the SQL from it, executed against the database, and validated the result. Confidence is 0.93."
 }
 ```
 
@@ -728,3 +513,10 @@ The optional `feedback_log.csv` must have `query` and `corrected_sql` columns. *
 
 </div>
 # text-to-sql-2
+
+## 🔮 Improvements If Given More Time
+
+1. **Chain of Thought Prompting (CoT)**: Implement a strict two-step reasoning field in the JSON intent (e.g., `step_1_goal` and `step_2_math`). Forcing the LLM to explicitly write out the required math operations *before* mapping fields would prevent edge cases where single keywords (like "for") trigger impulsive structural errors.
+2. **Conversational Disambiguation**: When the engine encounters a vague or ambiguous query, instead of returning an outright rejection, it could return a `clarification_needed` state with follow-up questions, allowing a frontend UI to interactively resolve the intent with the user.
+3. **Multi-Table Join Support**: The current engine treats `v_sales` as a denormalized single source of truth. Expanding the `sql_validator` and prompt context to support full star/snowflake schemas with dynamic foreign key traversal would greatly expand its utility.
+4. **Fine-Tuned Local Models**: The deterministic boundaries of the JSON intent and SQL validation make this system a perfect candidate for dataset generation. Given more time, we could train a small local model (e.g., Llama 3 8B) on the pipeline's exact inputs and outputs, eliminating the need for expensive API calls entirely.
