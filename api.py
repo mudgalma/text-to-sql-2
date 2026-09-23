@@ -17,7 +17,7 @@ engine: TextToSQLEngine = None
 async def lifespan(app: FastAPI):
     global engine
     # Initialize engine on startup
-    engine = TextToSQLEngine()
+    engine = TextToSQLEngine(feedback_path="dataset/feedback_log.csv")
     yield
     # Close resources on shutdown
     if engine:
