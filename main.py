@@ -144,7 +144,10 @@ class TextToSQLEngine:
                         "generated_logic": cached_sql,
                         "result": exec_result.df.to_dict(orient="records") if exec_result.df is not None else [],
                         "confidence_score": 1.0,
-                        "explanation": "Result served from verified feedback cache.",
+                        "explanation": {
+                            "understood": "Matched exactly with verified feedback cache.",
+                            "generated": "Result served from verified feedback cache."
+                        },
                     }
                 except Exception as e:
                     return _failure_output(query, f"Cached SQL crashed: {e}")
